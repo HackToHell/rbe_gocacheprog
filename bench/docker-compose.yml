@@ -1,0 +1,34 @@
+services:
+  bazel-remote:
+    image: quay.io/bazel-remote/bazel-remote
+    command:
+      - --dir=/data
+      - --max_size=20
+      - --storage_mode=uncompressed
+    ports:
+      - "9092:9092"
+      - "8080:8080"
+    volumes:
+      - bazel-remote-data:/data
+
+  builder:
+    build:
+      context: ..
+      dockerfile: bench/Dockerfile
+    depends_on:
+      bazel-remote:
+        condition: service_started
+    environment:
+      GOCACHEPROG_TARGET: "bazel-remote:9092"
+      GOCACHEPROG_INSTANCE: ""
+      GOCACHEPROG_CACHE_DIR: "/tmp/gocacheprog-cache"
+      GOCACHEPROG_CACHE_SIZE_MB: "10240"
+      GOCACHEPROG_LOG_LEVEL: "info"
+      GOCACHEPROG_CONNECT_TIMEOUT: "30s"
+      GOCACHEPROG_REQUEST_TIMEOUT: "120s"
+      K8S_BUILD_TARGET: "${K8S_BUILD_TARGET:-./cmd/kubectl/...}"
+    volumes:
+      - ./results:/results
+
+volumes:
+  bazel-remote-data:
