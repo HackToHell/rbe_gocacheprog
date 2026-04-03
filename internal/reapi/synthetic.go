@@ -5,6 +5,22 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// Cached empty directory digest - never changes.
+var (
+	cachedDirData   []byte
+	cachedDirDigest Digest
+)
+
+func init() {
+	dir := EmptyDirectory()
+	data, digest, err := MarshalDeterministic(dir)
+	if err != nil {
+		panic("failed to marshal empty directory: " + err.Error())
+	}
+	cachedDirData = data
+	cachedDirDigest = digest
+}
+
 // SyntheticCommand builds a deterministic Command proto from an ActionID hex string.
 // Command { arguments: ["gocacheprog", "<actionIDHex>"] }
 func SyntheticCommand(actionIDHex string) *repb.Command {
@@ -71,13 +87,8 @@ func ComputeSyntheticDigests(actionIDHex string) (*SyntheticDigests, error) {
 		return nil, err
 	}
 
-	dir := EmptyDirectory()
-	dirData, dirDigest, err := MarshalDeterministic(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	action := SyntheticAction(cmdDigest, dirDigest)
+	// Use cached empty directory digest - it never changes.
+	action := SyntheticAction(cmdDigest, cachedDirDigest)
 	actionData, actionDigest, err := MarshalDeterministic(action)
 	if err != nil {
 		return nil, err
@@ -86,8 +97,8 @@ func ComputeSyntheticDigests(actionIDHex string) (*SyntheticDigests, error) {
 	return &SyntheticDigests{
 		CommandData:   cmdData,
 		CommandDigest: cmdDigest,
-		DirData:       dirData,
-		DirDigest:     dirDigest,
+		DirData:       cachedDirData,
+		DirDigest:     cachedDirDigest,
 		ActionData:    actionData,
 		ActionDigest:  actionDigest,
 	}, nil

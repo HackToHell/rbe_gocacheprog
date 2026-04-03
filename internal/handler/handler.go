@@ -9,22 +9,27 @@ import (
 	"github.com/hacktohell/rbe_gocacheprog/internal/cache"
 	"github.com/hacktohell/rbe_gocacheprog/internal/protocol"
 	"github.com/hacktohell/rbe_gocacheprog/internal/reapi"
+	"golang.org/x/sync/semaphore"
+	"golang.org/x/sync/singleflight"
 )
 
 // Handler routes GOCACHEPROG requests to the appropriate handler.
 type Handler struct {
-	Cache    *cache.DiskCache
-	Client   *reapi.Client // may be nil for local-only mode
-	RemoteWg sync.WaitGroup // tracks in-flight remote populate goroutines
+	Cache           *cache.DiskCache
+	Client          *reapi.Client       // may be nil for local-only mode
+	RemoteWg        sync.WaitGroup      // tracks in-flight remote populate goroutines
+	sfGroup         singleflight.Group  // deduplicates concurrent GETs
+	RemoteSem       *semaphore.Weighted // limits concurrent remote populates
+	MaxArtifactSize int64               // max artifact size in bytes (0 = no limit)
 }
 
 // Handle processes a single request and returns a response.
 func (h *Handler) Handle(ctx context.Context, req *protocol.Request) *protocol.Response {
 	switch req.Command {
 	case "get":
-		return HandleGet(ctx, req, h.Cache, h.Client)
+		return HandleGet(ctx, req, h.Cache, h.Client, &h.sfGroup)
 	case "put":
-		return HandlePut(ctx, req, h.Cache, h.Client, &h.RemoteWg)
+		return HandlePut(ctx, req, h.Cache, h.Client, &h.RemoteWg, h.RemoteSem, h.MaxArtifactSize)
 	case "close":
 		return h.handleClose(req)
 	default:

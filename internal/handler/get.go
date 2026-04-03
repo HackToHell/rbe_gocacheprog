@@ -9,10 +9,11 @@ import (
 	"github.com/hacktohell/rbe_gocacheprog/internal/cache"
 	"github.com/hacktohell/rbe_gocacheprog/internal/protocol"
 	"github.com/hacktohell/rbe_gocacheprog/internal/reapi"
+	"golang.org/x/sync/singleflight"
 )
 
 // HandleGet processes a get request.
-func HandleGet(ctx context.Context, req *protocol.Request, dc *cache.DiskCache, client *reapi.Client) *protocol.Response {
+func HandleGet(ctx context.Context, req *protocol.Request, dc *cache.DiskCache, client *reapi.Client, sfGroup *singleflight.Group) *protocol.Response {
 	actionIDHex := reapi.HexEncode(req.ActionID)
 
 	// Step 1: Check local disk cache.
@@ -33,16 +34,35 @@ func HandleGet(ctx context.Context, req *protocol.Request, dc *cache.DiskCache, 
 	}
 
 	// Step 2: Check for metadata stub (body evicted, CAS refill possible).
-	if stubMeta, isStub := dc.HasMetadataStub(actionIDHex); isStub && client != nil {
-		resp := refillFromCAS(ctx, req, dc, client, actionIDHex, stubMeta)
+	// Lookup already returned metadata when the body is missing (meta != nil, hit == false).
+	// Reuse it to avoid a redundant ReadMetadata + os.Stat.
+	if meta != nil && client != nil {
+		resp := refillFromCAS(ctx, req, dc, client, actionIDHex, meta)
 		if resp != nil {
 			return resp
 		}
 	}
 
-	// Step 3: Remote AC lookup.
+	// Step 3: Remote AC lookup with singleflight deduplication.
 	if client != nil {
-		return remoteACLookup(ctx, req, dc, client, actionIDHex)
+		type sfResult struct {
+			resp *protocol.Response
+		}
+		v, _, _ := sfGroup.Do(actionIDHex, func() (interface{}, error) {
+			return &sfResult{resp: remoteACLookup(ctx, req, dc, client, actionIDHex)}, nil
+		})
+		result := v.(*sfResult)
+		// Each caller needs its own response with the correct request ID.
+		orig := result.resp
+		return &protocol.Response{
+			ID:       req.ID,
+			Err:      orig.Err,
+			Miss:     orig.Miss,
+			OutputID: orig.OutputID,
+			Size:     orig.Size,
+			Time:     orig.Time,
+			DiskPath: orig.DiskPath,
+		}
 	}
 
 	return &protocol.Response{ID: req.ID, Miss: true}

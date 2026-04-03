@@ -12,36 +12,43 @@ import (
 // GetActionResult looks up an ActionResult by action digest.
 // Returns (nil, nil) on cache miss (NOT_FOUND).
 func (c *Client) GetActionResult(ctx context.Context, actionDigest Digest) (*repb.ActionResult, error) {
-	rCtx, cancel := c.rpcCtx(ctx)
-	defer cancel()
+	resp, err := retryRPCWithCtx(ctx, c.cb, func() (*repb.ActionResult, error) {
+		rCtx, cancel := c.rpcCtx(ctx)
+		defer cancel()
 
-	acClient := repb.NewActionCacheClient(c.conn)
-	resp, err := acClient.GetActionResult(rCtx, &repb.GetActionResultRequest{
-		InstanceName: c.instanceName,
-		ActionDigest: actionDigest.ToProto(),
+		acClient := c.acClient
+		resp, err := acClient.GetActionResult(rCtx, &repb.GetActionResultRequest{
+			InstanceName: c.instanceName,
+			ActionDigest: actionDigest.ToProto(),
+		})
+		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("GetActionResult: %w", err)
+		}
+		return resp, nil
 	})
 	if err != nil {
-		if status.Code(err) == codes.NotFound {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("GetActionResult: %w", err)
+		return nil, err
 	}
 	return resp, nil
 }
 
 // UpdateActionResult stores an ActionResult keyed by action digest.
+// The returned error preserves the original gRPC status code so callers
+// can inspect it with status.Code().
 func (c *Client) UpdateActionResult(ctx context.Context, actionDigest Digest, result *repb.ActionResult) error {
-	rCtx, cancel := c.rpcCtx(ctx)
-	defer cancel()
+	return retryRPCNoResultWithCtx(ctx, c.cb, func() error {
+		rCtx, cancel := c.rpcCtx(ctx)
+		defer cancel()
 
-	acClient := repb.NewActionCacheClient(c.conn)
-	_, err := acClient.UpdateActionResult(rCtx, &repb.UpdateActionResultRequest{
-		InstanceName: c.instanceName,
-		ActionDigest: actionDigest.ToProto(),
-		ActionResult: result,
+		acClient := c.acClient
+		_, err := acClient.UpdateActionResult(rCtx, &repb.UpdateActionResultRequest{
+			InstanceName: c.instanceName,
+			ActionDigest: actionDigest.ToProto(),
+			ActionResult: result,
+		})
+		return err
 	})
-	if err != nil {
-		return fmt.Errorf("UpdateActionResult: %w", err)
-	}
-	return nil
 }

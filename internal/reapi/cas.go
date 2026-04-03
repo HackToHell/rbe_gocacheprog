@@ -16,29 +16,31 @@ import (
 
 // FindMissingBlobs checks which digests are absent from CAS.
 func (c *Client) FindMissingBlobs(ctx context.Context, digests []Digest) ([]Digest, error) {
-	rCtx, cancel := c.rpcCtx(ctx)
-	defer cancel()
+	return retryRPCWithCtx(ctx, c.cb, func() ([]Digest, error) {
+		rCtx, cancel := c.rpcCtx(ctx)
+		defer cancel()
 
-	casClient := repb.NewContentAddressableStorageClient(c.conn)
+		casClient := c.casClient
 
-	protoDigests := make([]*repb.Digest, len(digests))
-	for i, d := range digests {
-		protoDigests[i] = d.ToProto()
-	}
+		protoDigests := make([]*repb.Digest, len(digests))
+		for i, d := range digests {
+			protoDigests[i] = d.ToProto()
+		}
 
-	resp, err := casClient.FindMissingBlobs(rCtx, &repb.FindMissingBlobsRequest{
-		InstanceName: c.instanceName,
-		BlobDigests:  protoDigests,
+		resp, err := casClient.FindMissingBlobs(rCtx, &repb.FindMissingBlobsRequest{
+			InstanceName: c.instanceName,
+			BlobDigests:  protoDigests,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("FindMissingBlobs: %w", err)
+		}
+
+		missing := make([]Digest, len(resp.GetMissingBlobDigests()))
+		for i, d := range resp.GetMissingBlobDigests() {
+			missing[i] = DigestFromProto(d)
+		}
+		return missing, nil
 	})
-	if err != nil {
-		return nil, fmt.Errorf("FindMissingBlobs: %w", err)
-	}
-
-	missing := make([]Digest, len(resp.GetMissingBlobDigests()))
-	for i, d := range resp.GetMissingBlobDigests() {
-		missing[i] = DigestFromProto(d)
-	}
-	return missing, nil
 }
 
 // UploadBlob uploads data to CAS if missing. Uses batch for small blobs, ByteStream for large.
@@ -84,32 +86,34 @@ func (c *Client) UploadFile(ctx context.Context, path string, digest Digest) err
 }
 
 func (c *Client) batchUpload(ctx context.Context, digest Digest, data []byte) error {
-	rCtx, cancel := c.rpcCtx(ctx)
-	defer cancel()
+	return retryRPCNoResultWithCtx(ctx, c.cb, func() error {
+		rCtx, cancel := c.rpcCtx(ctx)
+		defer cancel()
 
-	casClient := repb.NewContentAddressableStorageClient(c.conn)
-	resp, err := casClient.BatchUpdateBlobs(rCtx, &repb.BatchUpdateBlobsRequest{
-		InstanceName: c.instanceName,
-		Requests: []*repb.BatchUpdateBlobsRequest_Request{
-			{Digest: digest.ToProto(), Data: data},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("BatchUpdateBlobs: %w", err)
-	}
-	for _, r := range resp.GetResponses() {
-		if r.GetStatus().GetCode() != int32(codes.OK) {
-			return fmt.Errorf("BatchUpdateBlobs %s: %s", r.GetDigest().GetHash(), r.GetStatus().GetMessage())
+		casClient := c.casClient
+		resp, err := casClient.BatchUpdateBlobs(rCtx, &repb.BatchUpdateBlobsRequest{
+			InstanceName: c.instanceName,
+			Requests: []*repb.BatchUpdateBlobsRequest_Request{
+				{Digest: digest.ToProto(), Data: data},
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("BatchUpdateBlobs: %w", err)
 		}
-	}
-	return nil
+		for _, r := range resp.GetResponses() {
+			if r.GetStatus().GetCode() != int32(codes.OK) {
+				return fmt.Errorf("BatchUpdateBlobs %s: %s", r.GetDigest().GetHash(), r.GetStatus().GetMessage())
+			}
+		}
+		return nil
+	})
 }
 
 func (c *Client) byteStreamUpload(ctx context.Context, digest Digest, r io.Reader) error {
 	rCtx, cancel := c.rpcCtx(ctx)
 	defer cancel()
 
-	bsClient := bytestream.NewByteStreamClient(c.conn)
+	bsClient := c.bsClient
 	stream, err := bsClient.Write(rCtx)
 	if err != nil {
 		return fmt.Errorf("ByteStream.Write: %w", err)
@@ -158,10 +162,13 @@ func (c *Client) DownloadBlob(ctx context.Context, digest Digest, w io.Writer) e
 }
 
 func (c *Client) batchDownload(ctx context.Context, digest Digest, w io.Writer) error {
+	// No retry: w is a stateful io.Writer (typically a file). Retrying would
+	// append duplicate data, corrupting the output. The caller's digest
+	// verification catches transient failures.
 	rCtx, cancel := c.rpcCtx(ctx)
 	defer cancel()
 
-	casClient := repb.NewContentAddressableStorageClient(c.conn)
+	casClient := c.casClient
 	resp, err := casClient.BatchReadBlobs(rCtx, &repb.BatchReadBlobsRequest{
 		InstanceName: c.instanceName,
 		Digests:      []*repb.Digest{digest.ToProto()},
@@ -185,7 +192,7 @@ func (c *Client) byteStreamDownload(ctx context.Context, digest Digest, w io.Wri
 	rCtx, cancel := c.rpcCtx(ctx)
 	defer cancel()
 
-	bsClient := bytestream.NewByteStreamClient(c.conn)
+	bsClient := c.bsClient
 	resourceName := fmt.Sprintf("%s/blobs/%s/%d", c.instanceName, digest.Hash, digest.Size)
 
 	stream, err := bsClient.Read(rCtx, &bytestream.ReadRequest{

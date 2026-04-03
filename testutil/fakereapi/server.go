@@ -24,12 +24,13 @@ type Server struct {
 	grpcServer *grpc.Server
 	listener   net.Listener
 
-	mu           sync.RWMutex
-	blobs        map[string][]byte            // hash -> data
-	actionCache  map[string]*repb.ActionResult // action digest hash -> result
+	mu            sync.RWMutex
+	blobs         map[string][]byte             // hash -> data
+	actionCache   map[string]*repb.ActionResult // action digest hash -> result
 	updateEnabled bool
 
 	// Fault injection hooks. If set, called before normal handling.
+	OnFindMissingBlobs   func(ctx context.Context, req *repb.FindMissingBlobsRequest) (*repb.FindMissingBlobsResponse, error)
 	OnGetActionResult    func(ctx context.Context, req *repb.GetActionResultRequest) (*repb.ActionResult, error)
 	OnUpdateActionResult func(ctx context.Context, req *repb.UpdateActionResultRequest) (*repb.ActionResult, error)
 	OnBatchReadBlobs     func(ctx context.Context, req *repb.BatchReadBlobsRequest) (*repb.BatchReadBlobsResponse, error)
@@ -170,6 +171,10 @@ type casServer struct {
 }
 
 func (c *casServer) FindMissingBlobs(ctx context.Context, req *repb.FindMissingBlobsRequest) (*repb.FindMissingBlobsResponse, error) {
+	if c.s.OnFindMissingBlobs != nil {
+		return c.s.OnFindMissingBlobs(ctx, req)
+	}
+
 	c.s.mu.RLock()
 	defer c.s.mu.RUnlock()
 

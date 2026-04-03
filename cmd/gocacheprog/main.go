@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,9 +11,9 @@ import (
 	"github.com/hacktohell/rbe_gocacheprog/internal/cache"
 	"github.com/hacktohell/rbe_gocacheprog/internal/config"
 	"github.com/hacktohell/rbe_gocacheprog/internal/handler"
-	"github.com/hacktohell/rbe_gocacheprog/internal/metrics"
 	"github.com/hacktohell/rbe_gocacheprog/internal/protocol"
 	"github.com/hacktohell/rbe_gocacheprog/internal/reapi"
+	"golang.org/x/sync/semaphore"
 )
 
 func main() {
@@ -45,27 +46,37 @@ func run(ctx context.Context) error {
 		TLSCert:        cfg.TLSCert,
 		TLSKey:         cfg.TLSKey,
 		TLSCA:          cfg.TLSCA,
-		ConnectTimeout: cfg.ConnectTimeout,
-		RequestTimeout: cfg.RequestTimeout,
+		ConnectTimeout: cfg.ConnectTimeout.Duration,
+		RequestTimeout: cfg.RequestTimeout.Duration,
 	})
 	if err != nil {
 		slog.Warn("remote unavailable, starting in local-only mode", "error", err)
 		client = nil
 	}
 
-	if cfg.MetricsAddr != "" {
-		metrics.Get() // register application metrics with the global Prometheus registry
-		go func() {
-			slog.Info("metrics server starting", "addr", cfg.MetricsAddr)
-			if err := metrics.Serve(cfg.MetricsAddr); err != nil {
-				slog.Error("metrics server failed", "error", err)
-			}
-		}()
+	h := &handler.Handler{
+		Cache:           dc,
+		Client:          client,
+		RemoteSem:       semaphore.NewWeighted(int64(cfg.Workers * 4)),
+		MaxArtifactSize: cfg.MaxArtifactSizeBytes(),
 	}
 
-	h := &handler.Handler{
-		Cache:  dc,
-		Client: client,
+	if cfg.HealthAddr != "" {
+		go func() {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("ok"))
+			})
+			mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("ok"))
+			})
+			slog.Info("health server starting", "addr", cfg.HealthAddr)
+			if err := http.ListenAndServe(cfg.HealthAddr, mux); err != nil {
+				slog.Error("health server failed", "error", err)
+			}
+		}()
 	}
 
 	reader := protocol.NewReader(os.Stdin)

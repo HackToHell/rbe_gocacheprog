@@ -144,19 +144,48 @@ This builds kubectl with 4 cache scenarios and produces a comparison table:
 | A | default go cache, cold |
 | B | default go cache, warm |
 
-Sample results building `./cmd/kubectl/...` from Kubernetes v1.32.0:
+Sample results building `./cmd/kubectl/...` from Kubernetes v1.32.0 (AMD EPYC 7B13, 32 vCPU):
 
 | Scenario | Wall Clock | User CPU | Sys CPU | Peak RSS |
 |---|---|---|---|---|
-| D - cacheprog, both cold | 36.8s | 243.4s | 62.2s | 1,110 MB |
-| C - cacheprog, warm remote | **2.0s** | 1.5s | 1.3s | 61 MB |
-| A - default go cache, cold | 21.8s | 238.6s | 58.1s | 411 MB |
-| B - default go cache, warm | 0.4s | 1.4s | 1.2s | 80 MB |
+| D - cacheprog, both cold | 34.8s | 248.3s | 61.6s | 1,081 MB |
+| C - cacheprog, warm remote | **2.6s** | 1.7s | 1.3s | 67 MB |
+| A - default go cache, cold | 21.3s | 242.7s | 58.0s | 460 MB |
+| B - default go cache, warm | 0.4s | 1.4s | 1.3s | 76 MB |
 
 Key takeaways:
-- **C vs A**: remote cache is **10x faster** than a cold compile
-- **D vs A**: cold cacheprog adds ~15s overhead from gRPC upload
-- **C vs B**: remote fetch is ~5x slower than local warm cache (network vs disk)
+- **C vs A**: remote cache is **~8x faster** than a cold compile
+- **D vs A**: cold cacheprog adds ~13s overhead from gRPC upload
+- **C vs B**: remote fetch is ~6x slower than local warm cache (network vs disk)
+
+### Unit benchmarks
+
+Run micro-benchmarks for individual components:
+
+```bash
+make bench
+```
+
+Sample results (AMD EPYC 7B13, 32 vCPU):
+
+| Benchmark | ns/op | MB/s | allocs/op |
+|---|---|---|---|
+| ReaderReadGet | 1,347 | 60.9 | 7 |
+| ReaderReadPut/1KiB | 11,849 | 128.8 | 11 |
+| WriterWriteHit | 963 | 224.2 | 2 |
+| DigestBytes/1MiB | 662,746 | 1,582.2 | 2 |
+| DigestFile/1MiB | 771,037 | 1,360.0 | 8 |
+| ComputeSyntheticDigests | 1,476 | - | 12 |
+| CircuitBreakerAllowClosed | 6 | - | 0 |
+| CircuitBreakerAllowParallel | 51 | - | 0 |
+| ReadMetadata | 11,631 | - | 10 |
+| DiskCacheInstall/1KiB | 1,390,534 | - | 33 |
+| DiskCacheLookupHit | 14,414 | - | 14 |
+| DiskCacheLookupMiss | 2,556 | - | 4 |
+| DiskCacheLookupHitParallel | 4,841 | - | 14 |
+| HandleGetLocalHit | 15,438 | - | 18 |
+| HandleGetLocalMiss | 2,850 | - | 7 |
+| PutThenGetRoundTrip | 1,413,824 | - | 60 |
 
 Results are written to `bench/results/summary.txt`. Customize the build target:
 

@@ -5,14 +5,21 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"math/rand"
 	"os"
 	"time"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+	"google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
 )
+
+const maxGRPCMessageSize = 64 * 1024 * 1024 // 64 MiB
 
 // ClientConfig holds REAPI client configuration.
 type ClientConfig struct {
@@ -33,6 +40,10 @@ type Client struct {
 	requestTimeout time.Duration
 	maxBatchSize   int64
 	updateEnabled  bool
+	casClient      repb.ContentAddressableStorageClient
+	acClient       repb.ActionCacheClient
+	bsClient       bytestream.ByteStreamClient
+	cb             *CircuitBreaker
 }
 
 // NewClient creates a new REAPI client, connects, and discovers capabilities.
@@ -42,12 +53,22 @@ func NewClient(ctx context.Context, cfg ClientConfig) (*Client, error) {
 		return nil, err
 	}
 
-	dialCtx, cancel := context.WithTimeout(ctx, cfg.ConnectTimeout)
-	defer cancel()
-
-	conn, err := grpc.DialContext(dialCtx, cfg.Target, opts...)
+	conn, err := grpc.NewClient(cfg.Target, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("grpc dial %s: %w", cfg.Target, err)
+	}
+
+	// grpc.NewClient connects lazily. Force a connection attempt within the
+	// configured timeout so callers fail fast when the remote is unreachable.
+	if cfg.ConnectTimeout > 0 {
+		connectCtx, connectCancel := context.WithTimeout(ctx, cfg.ConnectTimeout)
+		defer connectCancel()
+		conn.Connect()
+		if !conn.WaitForStateChange(connectCtx, conn.GetState()) {
+			// Context expired before any state change - remote is unreachable.
+			conn.Close()
+			return nil, fmt.Errorf("grpc connect %s: timed out after %s", cfg.Target, cfg.ConnectTimeout)
+		}
 	}
 
 	c := &Client{
@@ -57,6 +78,11 @@ func NewClient(ctx context.Context, cfg ClientConfig) (*Client, error) {
 		maxBatchSize:   4 * 1024 * 1024, // default 4 MiB
 		updateEnabled:  true,
 	}
+
+	c.casClient = repb.NewContentAddressableStorageClient(conn)
+	c.acClient = repb.NewActionCacheClient(conn)
+	c.bsClient = bytestream.NewByteStreamClient(conn)
+	c.cb = NewCircuitBreaker(5, 30*time.Second)
 
 	if err := c.discoverCapabilities(ctx); err != nil {
 		// Non-fatal: use defaults and continue.
@@ -75,6 +101,10 @@ func NewClientFromConn(conn *grpc.ClientConn, instanceName string, requestTimeou
 		requestTimeout: requestTimeout,
 		maxBatchSize:   4 * 1024 * 1024,
 		updateEnabled:  true,
+		casClient:      repb.NewContentAddressableStorageClient(conn),
+		acClient:       repb.NewActionCacheClient(conn),
+		bsClient:       bytestream.NewByteStreamClient(conn),
+		cb:             NewCircuitBreaker(5, 30*time.Second),
 	}
 }
 
@@ -124,9 +154,92 @@ func (c *Client) rpcCtx(ctx context.Context) (context.Context, context.CancelFun
 	return context.WithTimeout(ctx, c.requestTimeout)
 }
 
+// CheckCircuit returns an error if the circuit breaker is open.
+func (c *Client) CheckCircuit() error {
+	if c.cb != nil && !c.cb.Allow() {
+		return fmt.Errorf("circuit breaker open: remote temporarily unavailable")
+	}
+	return nil
+}
+
+// RecordSuccess records a successful RPC on the circuit breaker.
+func (c *Client) RecordSuccess() {
+	if c.cb != nil {
+		c.cb.RecordSuccess()
+	}
+}
+
+// RecordFailure records a failed RPC on the circuit breaker.
+func (c *Client) RecordFailure() {
+	if c.cb != nil {
+		c.cb.RecordFailure()
+	}
+}
+
+// retryRPCWithCtx retries an RPC function on transient errors with exponential backoff.
+// retry attempt. If the parent context is already done, it returns immediately
+// instead of wasting time on hopeless retries.
+func retryRPCWithCtx[T any](ctx context.Context, cb *CircuitBreaker, fn func() (T, error)) (T, error) {
+	const maxAttempts = 3
+	const baseDelay = 100 * time.Millisecond
+
+	var zero T
+	if cb != nil && !cb.Allow() {
+		return zero, fmt.Errorf("circuit breaker open: remote temporarily unavailable")
+	}
+
+	var lastErr error
+	for attempt := range maxAttempts {
+		if ctx.Err() != nil {
+			return zero, ctx.Err()
+		}
+		result, err := fn()
+		if err == nil {
+			if cb != nil {
+				cb.RecordSuccess()
+			}
+			return result, nil
+		}
+		code := status.Code(err)
+		if code != codes.Unavailable && code != codes.ResourceExhausted && code != codes.DeadlineExceeded {
+			return zero, err
+		}
+		lastErr = err
+		if attempt < maxAttempts-1 {
+			delay := baseDelay * time.Duration(1<<uint(attempt))
+			jitter := time.Duration(rand.Int63n(int64(delay) / 2))
+			time.Sleep(delay + jitter)
+		}
+	}
+	if cb != nil {
+		cb.RecordFailure()
+	}
+	return zero, lastErr
+}
+
+// retryRPCNoResultWithCtx is like retryRPCWithCtx but for functions that only return an error.
+func retryRPCNoResultWithCtx(ctx context.Context, cb *CircuitBreaker, fn func() error) error {
+	_, err := retryRPCWithCtx(ctx, cb, func() (struct{}, error) {
+		return struct{}{}, fn()
+	})
+	return err
+}
+
 func dialOptions(cfg ClientConfig) ([]grpc.DialOption, error) {
+	opts := []grpc.DialOption{
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(maxGRPCMessageSize),
+			grpc.MaxCallSendMsgSize(maxGRPCMessageSize),
+		),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                30 * time.Second,
+			Timeout:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	}
+
 	if cfg.TLSCert == "" && cfg.TLSKey == "" && cfg.TLSCA == "" {
-		return []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, nil
+		return append(opts, grpc.WithTransportCredentials(insecure.NewCredentials())), nil
 	}
 
 	tlsCfg := &tls.Config{}
@@ -151,5 +264,5 @@ func dialOptions(cfg ClientConfig) ([]grpc.DialOption, error) {
 		tlsCfg.RootCAs = pool
 	}
 
-	return []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg))}, nil
+	return append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg))), nil
 }

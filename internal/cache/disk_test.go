@@ -3,6 +3,7 @@ package cache_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,6 +199,49 @@ func TestBodyAndMetadataPaths(t *testing.T) {
 	}
 	if mp != "/cache/ab/"+hex+"-m" {
 		t.Errorf("meta path = %q", mp)
+	}
+}
+
+func TestReadMetadataLargerThanPoolBuffer(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "ab")
+	os.MkdirAll(subDir, 0o700)
+	path := filepath.Join(subDir, "testmeta-m")
+
+	// Create metadata with fields large enough to exceed the 512-byte pool buffer.
+	longHash := strings.Repeat("ab", 256) // 512 chars
+	meta := &cache.Metadata{
+		OutputIDHex:   strings.Repeat("cd", 128), // 256 chars
+		Size:          99999,
+		Time:          time.Now(),
+		CASDigestHash: longHash,
+		CASDigestSize: 99999,
+	}
+	if err := cache.WriteMetadata(path, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the file is actually larger than 512 bytes.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() <= 512 {
+		t.Fatalf("metadata file is %d bytes, expected >512 to exercise fallback", info.Size())
+	}
+
+	got, err := cache.ReadMetadata(path)
+	if err != nil {
+		t.Fatalf("ReadMetadata failed on large file: %v", err)
+	}
+	if got.OutputIDHex != meta.OutputIDHex {
+		t.Errorf("OutputIDHex mismatch: got len %d, want len %d", len(got.OutputIDHex), len(meta.OutputIDHex))
+	}
+	if got.CASDigestHash != longHash {
+		t.Errorf("CASDigestHash mismatch: got len %d, want len %d", len(got.CASDigestHash), len(longHash))
+	}
+	if got.Size != 99999 {
+		t.Errorf("Size = %d, want 99999", got.Size)
 	}
 }
 

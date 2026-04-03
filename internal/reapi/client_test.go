@@ -178,7 +178,7 @@ func TestACUpdateDisabled(t *testing.T) {
 	if err == nil {
 		t.Error("expected error when updates disabled")
 	}
-	if !strings.Contains(err.Error(), "UpdateActionResult") {
+	if !strings.Contains(err.Error(), "PermissionDenied") && !strings.Contains(err.Error(), "AC updates disabled") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

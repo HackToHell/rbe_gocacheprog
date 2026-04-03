@@ -1,9 +1,15 @@
-.PHONY: build bench-image bench-run bench-clean
+.PHONY: build test bench bench-image bench-run bench-clean
 
 bin/gocacheprog: $(shell find cmd internal -name '*.go')
 	go build -o $@ ./cmd/gocacheprog
 
 build: bin/gocacheprog
+
+test:
+	go test ./...
+
+bench:
+	go test -bench=. -benchmem -count=1 ./internal/protocol/ ./internal/reapi/ ./internal/cache/ ./internal/handler/
 
 bench-image:
 	docker compose -f bench/docker-compose.yml build

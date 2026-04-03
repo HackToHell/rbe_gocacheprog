@@ -2,9 +2,11 @@ package cache
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -56,8 +58,11 @@ func (dc *DiskCache) Install(actionIDHex string, tempBodyPath string, meta *Meta
 	metaPath := MetadataPath(dc.dir, actionIDHex)
 
 	dir := filepath.Dir(bodyPath)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("mkdir: %w", err)
+	// Fast-path: skip MkdirAll if shard directory already exists.
+	if _, err := os.Stat(dir); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return "", fmt.Errorf("mkdir: %w", err)
+		}
 	}
 
 	if err := os.Rename(tempBodyPath, bodyPath); err != nil {
@@ -97,8 +102,9 @@ func (dc *DiskCache) Lookup(actionIDHex string) (*Metadata, string, bool) {
 		return nil, "", false
 	}
 
+	// Stat body file outside the mutex - filesystem I/O should not block
+	// concurrent lookups on different keys.
 	if _, err := os.Stat(bodyPath); err != nil {
-		// Metadata exists but body is gone (evicted stub).
 		return meta, "", false
 	}
 
@@ -179,13 +185,28 @@ func (dc *DiskCache) scan() {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 
-	prefixes, _ := os.ReadDir(dc.dir)
-	for _, prefix := range prefixes {
+	// Clean up orphan temp files from previous crashes.
+	rootEntries, err := os.ReadDir(dc.dir)
+	if err != nil {
+		slog.Error("scan: failed to read cache dir", "dir", dc.dir, "error", err)
+		return
+	}
+	for _, f := range rootEntries {
+		if !f.IsDir() && strings.HasPrefix(f.Name(), "tmp-") {
+			os.Remove(filepath.Join(dc.dir, f.Name()))
+		}
+	}
+
+	for _, prefix := range rootEntries {
 		if !prefix.IsDir() || len(prefix.Name()) != 2 {
 			continue
 		}
 		subDir := filepath.Join(dc.dir, prefix.Name())
-		files, _ := os.ReadDir(subDir)
+		files, err := os.ReadDir(subDir)
+		if err != nil {
+			slog.Warn("scan: failed to read subdir", "dir", subDir, "error", err)
+			continue
+		}
 		for _, f := range files {
 			name := f.Name()
 			if len(name) < 3 {
