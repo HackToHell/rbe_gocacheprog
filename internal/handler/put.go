@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"io"
+	"hash"
 	"log/slog"
 	"os"
 	"sync"
@@ -74,24 +74,32 @@ func writeBodyToTemp(dc *cache.DiskCache, body []byte) (reapi.Digest, string, er
 	}
 	tmpName := tmp.Name()
 
-	h := sha256.New()
+	h := reapi.SHA256Pool.Get().(hash.Hash)
 	// Hash and write simultaneously to avoid traversing data twice.
-	w := io.MultiWriter(tmp, h)
-	if _, err := w.Write(body); err != nil {
+	// Write directly to both instead of io.MultiWriter to avoid its allocation.
+	h.Write(body)
+	if _, err := tmp.Write(body); err != nil {
+		h.Reset()
+		reapi.SHA256Pool.Put(h)
 		tmp.Close()
 		os.Remove(tmpName)
 		return reapi.Digest{}, "", err
 	}
 
 	if err := tmp.Close(); err != nil {
+		h.Reset()
+		reapi.SHA256Pool.Put(h)
 		os.Remove(tmpName)
 		return reapi.Digest{}, "", err
 	}
 
+	var buf [sha256.Size]byte
 	digest := reapi.Digest{
-		Hash: reapi.HexEncode(h.Sum(nil)),
+		Hash: reapi.HexEncode(h.Sum(buf[:0])),
 		Size: int64(len(body)),
 	}
+	h.Reset()
+	reapi.SHA256Pool.Put(h)
 	return digest, tmpName, nil
 }
 

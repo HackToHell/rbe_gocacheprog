@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	"github.com/google/uuid"
@@ -13,6 +14,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+// uploadBufPool reuses 1 MiB buffers for ByteStream uploads.
+var uploadBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 1024*1024)
+		return &b
+	},
+}
 
 // FindMissingBlobs checks which digests are absent from CAS.
 func (c *Client) FindMissingBlobs(ctx context.Context, digests []Digest) ([]Digest, error) {
@@ -22,9 +31,12 @@ func (c *Client) FindMissingBlobs(ctx context.Context, digests []Digest) ([]Dige
 
 		casClient := c.casClient
 
+		// Single backing array for both the pointer slice and the proto structs.
+		protoBacking := make([]repb.Digest, len(digests))
 		protoDigests := make([]*repb.Digest, len(digests))
 		for i, d := range digests {
-			protoDigests[i] = d.ToProto()
+			d.FillProto(&protoBacking[i])
+			protoDigests[i] = &protoBacking[i]
 		}
 
 		resp, err := casClient.FindMissingBlobs(rCtx, &repb.FindMissingBlobsRequest{
@@ -69,19 +81,22 @@ func (c *Client) UploadFile(ctx context.Context, path string, digest Digest) err
 		return nil
 	}
 
-	if digest.Size <= c.maxBatchSize {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return c.batchUpload(ctx, digest, data)
-	}
-
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+
+	if digest.Size <= c.maxBatchSize {
+		// Read into a right-sized buffer instead of os.ReadFile which may
+		// over-allocate when stat size and actual size diverge.
+		data := make([]byte, digest.Size)
+		if _, err := io.ReadFull(f, data); err != nil {
+			return fmt.Errorf("read file for batch upload: %w", err)
+		}
+		return c.batchUpload(ctx, digest, data)
+	}
+
 	return c.byteStreamUpload(ctx, digest, f)
 }
 
@@ -121,7 +136,10 @@ func (c *Client) byteStreamUpload(ctx context.Context, digest Digest, r io.Reade
 
 	resourceName := fmt.Sprintf("%s/uploads/%s/blobs/%s/%d", c.instanceName, uuid.New().String(), digest.Hash, digest.Size)
 
-	buf := make([]byte, 1024*1024) // 1 MiB chunks
+	bufp := uploadBufPool.Get().(*[]byte)
+	buf := *bufp
+	defer uploadBufPool.Put(bufp)
+
 	first := true
 	for {
 		n, readErr := r.Read(buf)
