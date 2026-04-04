@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BUILD_TARGET="${K8S_BUILD_TARGET:-./cmd/kubectl/...}"
+# Support space-separated list of build targets; default to kubectl + kubeadm.
+BUILD_TARGETS="${K8S_BUILD_TARGETS:-./cmd/kubectl/... ./cmd/kubeadm/...}"
 RESULTS_DIR="/results"
 K8S_DIR="/src/k8s"
 LOCAL_CACHE_DIR="${GOCACHEPROG_CACHE_DIR:-/tmp/gocacheprog-cache}"
@@ -62,31 +63,45 @@ parse_cacheprog_stats() {
     echo "$gets|$puts|$misses"
 }
 
+# target_slug converts a build target like ./cmd/kubectl/... to "kubectl"
+target_slug() {
+    local t="$1"
+    # extract the last non-... path component
+    echo "$t" | sed 's|/\.\.\.$||' | sed 's|.*/||'
+}
+
 run_build() {
     local scenario="$1"
     local use_cacheprog="$2"
-    local timefile="$RESULTS_DIR/${scenario}.time"
+    local target="$3"
+    local slug
+    slug=$(target_slug "$target")
+    local timefile="$RESULTS_DIR/${scenario}.${slug}.time"
 
-    echo "=== Scenario $scenario ==="
+    echo "=== Scenario $scenario ($slug) ==="
 
     if [ "$use_cacheprog" = "yes" ]; then
-        local logfile="$RESULTS_DIR/${scenario}.gocacheprog.log"
+        local logfile="$RESULTS_DIR/${scenario}.${slug}.gocacheprog.log"
+        local profilefile="$RESULTS_DIR/${scenario}.${slug}.cpu.pprof"
         > "$logfile"
         local wrapper
         wrapper=$(create_wrapper "$logfile")
         export GOCACHEPROG="$wrapper"
-        echo "  Using gocacheprog (logs -> $logfile)"
+        export GOCACHEPROG_CPUPROFILE="$profilefile"
+        echo "  Using gocacheprog (logs -> $logfile, profile -> $profilefile)"
     else
         unset GOCACHEPROG 2>/dev/null || true
+        unset GOCACHEPROG_CPUPROFILE 2>/dev/null || true
         echo "  Using default go cache"
     fi
 
     cd "$K8S_DIR"
-    /usr/bin/time -v go build $BUILD_TARGET 2>"$timefile" || {
+    /usr/bin/time -v go build "$target" 2>"$timefile" || {
         echo "  Build failed! See $timefile for details:"
         cat "$timefile"
         return 1
     }
+    unset GOCACHEPROG_CPUPROFILE 2>/dev/null || true
     echo "  Done."
 }
 
@@ -101,52 +116,73 @@ clean_local_cacheprog() {
     mkdir -p "$LOCAL_CACHE_DIR"
 }
 
-# ---------- Scenario D: gocacheprog, both caches cold ----------
-echo ""
-echo "============================================"
-echo "  Scenario D: gocacheprog, both caches cold"
-echo "============================================"
-clean_go_cache
-clean_local_cacheprog
-run_build "D" "yes"
+# Populate remote cache for a given target (not timed).
+populate_remote() {
+    local target="$1"
+    local slug
+    slug=$(target_slug "$target")
+    echo ""
+    echo "============================================"
+    echo "  Populating remote cache for $slug (not timed)"
+    echo "============================================"
+    clean_go_cache
+    clean_local_cacheprog
+    local wrapper
+    wrapper=$(create_wrapper "/dev/null")
+    export GOCACHEPROG="$wrapper"
+    unset GOCACHEPROG_CPUPROFILE 2>/dev/null || true
+    cd "$K8S_DIR"
+    go build "$target"
+    echo "  Remote cache populated for $slug."
+}
 
-# ---------- Populate remote cache ----------
-echo ""
-echo "============================================"
-echo "  Populating remote cache (not timed)"
-echo "============================================"
-clean_go_cache
-clean_local_cacheprog
-wrapper=$(create_wrapper "/dev/null")
-export GOCACHEPROG="$wrapper"
-cd "$K8S_DIR"
-go build $BUILD_TARGET
-echo "  Remote cache populated."
+# ============================================================
+# Main benchmark loop over each build target
+# ============================================================
+for BUILD_TARGET in $BUILD_TARGETS; do
+    SLUG=$(target_slug "$BUILD_TARGET")
+    echo ""
+    echo "############################################"
+    echo "  Target: $BUILD_TARGET  (slug: $SLUG)"
+    echo "############################################"
 
-# ---------- Scenario C: gocacheprog, cold local, warm remote ----------
-echo ""
-echo "============================================"
-echo "  Scenario C: gocacheprog, warm remote"
-echo "============================================"
-clean_go_cache
-clean_local_cacheprog
-run_build "C" "yes"
+    # ---------- Scenario D: gocacheprog, both caches cold ----------
+    echo ""
+    echo "============================================"
+    echo "  Scenario D ($SLUG): gocacheprog, both caches cold"
+    echo "============================================"
+    clean_go_cache
+    clean_local_cacheprog
+    run_build "D" "yes" "$BUILD_TARGET"
 
-# ---------- Scenario A: default go cache, cold ----------
-echo ""
-echo "============================================"
-echo "  Scenario A: default go cache, cold"
-echo "============================================"
-clean_go_cache
-run_build "A" "no"
+    # ---------- Populate remote cache ----------
+    populate_remote "$BUILD_TARGET"
 
-# ---------- Scenario B: default go cache, warm ----------
-echo ""
-echo "============================================"
-echo "  Scenario B: default go cache, warm"
-echo "============================================"
-# No cleaning - reuse warm cache from A
-run_build "B" "no"
+    # ---------- Scenario C: gocacheprog, cold local, warm remote ----------
+    echo ""
+    echo "============================================"
+    echo "  Scenario C ($SLUG): gocacheprog, warm remote"
+    echo "============================================"
+    clean_go_cache
+    clean_local_cacheprog
+    run_build "C" "yes" "$BUILD_TARGET"
+
+    # ---------- Scenario A: default go cache, cold ----------
+    echo ""
+    echo "============================================"
+    echo "  Scenario A ($SLUG): default go cache, cold"
+    echo "============================================"
+    clean_go_cache
+    run_build "A" "no" "$BUILD_TARGET"
+
+    # ---------- Scenario B: default go cache, warm ----------
+    echo ""
+    echo "============================================"
+    echo "  Scenario B ($SLUG): default go cache, warm"
+    echo "============================================"
+    # No cleaning - reuse warm cache from A
+    run_build "B" "no" "$BUILD_TARGET"
+done
 
 # ---------- Summary ----------
 echo ""
@@ -155,66 +191,80 @@ echo "  Results Summary"
 echo "============================================"
 echo ""
 
-printf "%-12s | %-20s | %-10s | %-10s | %-15s\n" \
-    "Scenario" "Wall Clock" "User CPU" "Sys CPU" "Peak RSS (KB)"
-printf "%-12s-+-%-20s-+-%-10s-+-%-10s-+-%-15s\n" \
-    "------------" "--------------------" "----------" "----------" "---------------"
-
-for scenario in D C A B; do
-    timefile="$RESULTS_DIR/${scenario}.time"
-    if [ -f "$timefile" ]; then
-        IFS='|' read -r wall user sys rss <<< "$(parse_time "$timefile")"
-        printf "%-12s | %-20s | %-10s | %-10s | %-15s\n" \
-            "$scenario" "$wall" "$user" "$sys" "$rss"
-    else
-        printf "%-12s | %-20s\n" "$scenario" "NO DATA"
-    fi
-done
-
-echo ""
-
-# Cacheprog stats for scenarios that used it
-echo "Cacheprog Stats:"
-printf "%-12s | %-10s | %-10s | %-10s\n" "Scenario" "GETs" "PUTs" "Misses"
-printf "%-12s-+-%-10s-+-%-10s-+-%-10s\n" \
-    "------------" "----------" "----------" "----------"
-
-for scenario in D C; do
-    logfile="$RESULTS_DIR/${scenario}.gocacheprog.log"
-    IFS='|' read -r gets puts misses <<< "$(parse_cacheprog_stats "$logfile")"
-    printf "%-12s | %-10s | %-10s | %-10s\n" "$scenario" "$gets" "$puts" "$misses"
-done
-
-echo ""
-echo "Legend:"
-echo "  A = Default go cache, cold (baseline full compile)"
-echo "  B = Default go cache, warm (best-case local)"
-echo "  C = gocacheprog, cold local + warm remote (remote fetch)"
-echo "  D = gocacheprog, both cold (full compile + remote upload)"
-echo ""
-echo "Key comparisons:"
-echo "  C < A  => remote cache provides speedup"
-echo "  D ~ A  => upload overhead is small (async)"
-echo "  B << A => local cache baseline"
-
-# Write summary to file
 {
     echo "Benchmark Results - $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-    echo "Build target: $BUILD_TARGET"
+    echo "Build targets: $BUILD_TARGETS"
     echo ""
-    printf "%-12s | %-20s | %-10s | %-10s | %-15s\n" \
-        "Scenario" "Wall Clock" "User CPU" "Sys CPU" "Peak RSS (KB)"
-    printf "%-12s-+-%-20s-+-%-10s-+-%-10s-+-%-15s\n" \
-        "------------" "--------------------" "----------" "----------" "---------------"
-    for scenario in D C A B; do
-        timefile="$RESULTS_DIR/${scenario}.time"
-        if [ -f "$timefile" ]; then
-            IFS='|' read -r wall user sys rss <<< "$(parse_time "$timefile")"
-            printf "%-12s | %-20s | %-10s | %-10s | %-15s\n" \
-                "$scenario" "$wall" "$user" "$sys" "$rss"
-        fi
-    done
-} > "$RESULTS_DIR/summary.txt"
+} | tee "$RESULTS_DIR/summary.txt"
+
+for BUILD_TARGET in $BUILD_TARGETS; do
+    SLUG=$(target_slug "$BUILD_TARGET")
+    {
+        echo "--- Target: $BUILD_TARGET ---"
+        echo ""
+        printf "%-12s | %-20s | %-10s | %-10s | %-15s\n" \
+            "Scenario" "Wall Clock" "User CPU" "Sys CPU" "Peak RSS (KB)"
+        printf "%-12s-+-%-20s-+-%-10s-+-%-10s-+-%-15s\n" \
+            "------------" "--------------------" "----------" "----------" "---------------"
+
+        for scenario in D C A B; do
+            timefile="$RESULTS_DIR/${scenario}.${SLUG}.time"
+            if [ -f "$timefile" ]; then
+                IFS='|' read -r wall user sys rss <<< "$(parse_time "$timefile")"
+                printf "%-12s | %-20s | %-10s | %-10s | %-15s\n" \
+                    "$scenario" "$wall" "$user" "$sys" "$rss"
+            else
+                printf "%-12s | %-20s\n" "$scenario" "NO DATA"
+            fi
+        done
+
+        echo ""
+        echo "Cacheprog Stats:"
+        printf "%-12s | %-10s | %-10s | %-10s\n" "Scenario" "GETs" "PUTs" "Misses"
+        printf "%-12s-+-%-10s-+-%-10s-+-%-10s\n" \
+            "------------" "----------" "----------" "----------"
+
+        for scenario in D C; do
+            logfile="$RESULTS_DIR/${scenario}.${SLUG}.gocacheprog.log"
+            IFS='|' read -r gets puts misses <<< "$(parse_cacheprog_stats "$logfile")"
+            printf "%-12s | %-10s | %-10s | %-10s\n" "$scenario" "$gets" "$puts" "$misses"
+        done
+        echo ""
+    } | tee -a "$RESULTS_DIR/summary.txt"
+done
+
+echo "" | tee -a "$RESULTS_DIR/summary.txt"
+{
+    echo "Legend:"
+    echo "  A = Default go cache, cold (baseline full compile)"
+    echo "  B = Default go cache, warm (best-case local)"
+    echo "  C = gocacheprog, cold local + warm remote (remote fetch)"
+    echo "  D = gocacheprog, both cold (full compile + remote upload)"
+    echo ""
+    echo "Key comparisons:"
+    echo "  C < A  => remote cache provides speedup"
+    echo "  D ~ A  => upload overhead is small (async)"
+    echo "  B << A => local cache baseline"
+} | tee -a "$RESULTS_DIR/summary.txt"
+
+# ---------- CPU Profile Analysis ----------
+echo ""
+echo "============================================"
+echo "  CPU Profile Analysis (go tool pprof -top)"
+echo "============================================"
+echo "" | tee -a "$RESULTS_DIR/summary.txt"
+echo "=== CPU Profile Analysis ===" | tee -a "$RESULTS_DIR/summary.txt"
+echo "" | tee -a "$RESULTS_DIR/summary.txt"
+
+for pprof_file in "$RESULTS_DIR"/*.cpu.pprof; do
+    [ -f "$pprof_file" ] || continue
+    label=$(basename "$pprof_file" .cpu.pprof)
+    echo "--- Profile: $label ---" | tee -a "$RESULTS_DIR/summary.txt"
+    go tool pprof -top -nodecount=20 "$pprof_file" 2>/dev/null | tee -a "$RESULTS_DIR/summary.txt" || \
+        echo "  (profile empty or gocacheprog exited before sampling)" | tee -a "$RESULTS_DIR/summary.txt"
+    echo "" | tee -a "$RESULTS_DIR/summary.txt"
+done
 
 echo ""
 echo "Results written to $RESULTS_DIR/summary.txt"
+echo "Raw pprof files available in $RESULTS_DIR/*.cpu.pprof"

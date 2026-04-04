@@ -26,7 +26,7 @@ services:
       GOCACHEPROG_LOG_LEVEL: "info"
       GOCACHEPROG_CONNECT_TIMEOUT: "30s"
       GOCACHEPROG_REQUEST_TIMEOUT: "120s"
-      K8S_BUILD_TARGET: "${K8S_BUILD_TARGET:-./cmd/kubectl/...}"
+      K8S_BUILD_TARGETS: "${K8S_BUILD_TARGETS:-./cmd/kubectl/... ./cmd/kubeadm/...}"
     volumes:
       - ./results:/results
 

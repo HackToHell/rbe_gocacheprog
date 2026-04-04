@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"syscall"
 
 	"github.com/hacktohell/rbe_gocacheprog/internal/cache"
@@ -27,6 +29,19 @@ func main() {
 }
 
 func run(ctx context.Context) error {
+	if profilePath := os.Getenv("GOCACHEPROG_CPUPROFILE"); profilePath != "" {
+		f, err := os.Create(profilePath)
+		if err != nil {
+			return fmt.Errorf("create cpu profile: %w", err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			f.Close()
+			return fmt.Errorf("start cpu profile: %w", err)
+		}
+		defer func() { pprof.StopCPUProfile(); f.Close() }()
+		slog.Info("cpu profiling enabled", "path", profilePath)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err

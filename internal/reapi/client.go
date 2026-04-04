@@ -217,12 +217,44 @@ func retryRPCWithCtx[T any](ctx context.Context, cb *CircuitBreaker, fn func() (
 	return zero, lastErr
 }
 
-// retryRPCNoResultWithCtx is like retryRPCWithCtx but for functions that only return an error.
+// retryRPCNoResultWithCtx is like retryRPCWithCtx but for functions that only
+// return an error. It has its own loop to avoid the closure + generic wrapper
+// overhead of delegating to retryRPCWithCtx (measurable in the upload hot path).
 func retryRPCNoResultWithCtx(ctx context.Context, cb *CircuitBreaker, fn func() error) error {
-	_, err := retryRPCWithCtx(ctx, cb, func() (struct{}, error) {
-		return struct{}{}, fn()
-	})
-	return err
+	const maxAttempts = 3
+	const baseDelay = 100 * time.Millisecond
+
+	if cb != nil && !cb.Allow() {
+		return fmt.Errorf("circuit breaker open: remote temporarily unavailable")
+	}
+
+	var lastErr error
+	for attempt := range maxAttempts {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		err := fn()
+		if err == nil {
+			if cb != nil {
+				cb.RecordSuccess()
+			}
+			return nil
+		}
+		code := status.Code(err)
+		if code != codes.Unavailable && code != codes.ResourceExhausted && code != codes.DeadlineExceeded {
+			return err
+		}
+		lastErr = err
+		if attempt < maxAttempts-1 {
+			delay := baseDelay * time.Duration(1<<uint(attempt))
+			jitter := time.Duration(rand.Int63n(int64(delay) / 2))
+			time.Sleep(delay + jitter)
+		}
+	}
+	if cb != nil {
+		cb.RecordFailure()
+	}
+	return lastErr
 }
 
 func dialOptions(cfg ClientConfig) ([]grpc.DialOption, error) {
