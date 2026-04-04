@@ -28,6 +28,8 @@ type entry struct {
 	size        int64
 	accessTime  time.Time
 	hasBody     bool
+	meta        *Metadata // cached metadata; avoids disk read on Lookup hit
+	bodyPath    string    // cached body path; avoids recomputation
 }
 
 // NewDiskCache creates a new DiskCache with the given directory and size target.
@@ -84,6 +86,8 @@ func (dc *DiskCache) Install(actionIDHex string, tempBodyPath string, meta *Meta
 		size:        meta.Size,
 		accessTime:  time.Now(),
 		hasBody:     true,
+		meta:        meta,
+		bodyPath:    bodyPath,
 	}
 	dc.pinned[actionIDHex] = true
 	dc.total += meta.Size
@@ -94,6 +98,47 @@ func (dc *DiskCache) Install(actionIDHex string, tempBodyPath string, meta *Meta
 
 // Lookup checks for a local cache hit. Returns metadata, body path, and whether it's a hit.
 func (dc *DiskCache) Lookup(actionIDHex string) (*Metadata, string, bool) {
+	// Fast path: check in-memory index for cached metadata to avoid
+	// ReadMetadata (open + read + json.Unmarshal) on every Lookup.
+	dc.mu.Lock()
+	e, inIndex := dc.entries[actionIDHex]
+	var cachedMeta *Metadata
+	var cachedBodyPath string
+	if inIndex && e.meta != nil {
+		cachedMeta = e.meta
+		cachedBodyPath = e.bodyPath
+	}
+	dc.mu.Unlock()
+
+	if cachedMeta != nil {
+		// Still need to verify body exists on disk (could be removed by Trim
+		// or external process).
+		if cachedBodyPath != "" {
+			if _, err := os.Stat(cachedBodyPath); err != nil {
+				// Body gone — mark entry as evicted.
+				dc.mu.Lock()
+				if e, ok := dc.entries[actionIDHex]; ok {
+					e.hasBody = false
+					e.bodyPath = ""
+				}
+				dc.mu.Unlock()
+				return cachedMeta, "", false
+			}
+		} else {
+			// Body already known to be evicted.
+			return cachedMeta, "", false
+		}
+
+		dc.mu.Lock()
+		if e, ok := dc.entries[actionIDHex]; ok {
+			e.accessTime = time.Now()
+		}
+		dc.pinned[actionIDHex] = true
+		dc.mu.Unlock()
+		return cachedMeta, cachedBodyPath, true
+	}
+
+	// Slow path: entry not in memory index (e.g. from a previous process).
 	metaPath := MetadataPath(dc.dir, actionIDHex)
 	bodyPath := BodyPath(dc.dir, actionIDHex)
 
@@ -102,15 +147,17 @@ func (dc *DiskCache) Lookup(actionIDHex string) (*Metadata, string, bool) {
 		return nil, "", false
 	}
 
-	// Stat body file outside the mutex - filesystem I/O should not block
-	// concurrent lookups on different keys.
+	// Stat body file outside the mutex.
 	if _, err := os.Stat(bodyPath); err != nil {
 		return meta, "", false
 	}
 
+	// Promote to in-memory cache for future lookups.
 	dc.mu.Lock()
 	if e, ok := dc.entries[actionIDHex]; ok {
 		e.accessTime = time.Now()
+		e.meta = meta
+		e.bodyPath = bodyPath
 	}
 	dc.pinned[actionIDHex] = true
 	dc.mu.Unlock()
@@ -285,6 +332,7 @@ func (dc *DiskCache) Trim() {
 		if e, ok := dc.entries[actionIDHex]; ok && e.hasBody {
 			dc.total -= e.size
 			e.hasBody = false
+			e.bodyPath = ""
 		}
 		dc.mu.Unlock()
 	}

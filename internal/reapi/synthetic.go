@@ -1,6 +1,8 @@
 package reapi
 
 import (
+	"sync"
+
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
 	"google.golang.org/protobuf/proto"
 )
@@ -79,8 +81,17 @@ type SyntheticDigests struct {
 	ActionDigest  Digest
 }
 
+// syntheticCache caches computed SyntheticDigests by actionIDHex to avoid
+// repeated proto marshal + SHA-256 for the same action ID.
+var syntheticCache sync.Map
+
 // ComputeSyntheticDigests computes all synthetic proto digests from an ActionID hex string.
+// Results are cached since the mapping is deterministic.
 func ComputeSyntheticDigests(actionIDHex string) (*SyntheticDigests, error) {
+	if v, ok := syntheticCache.Load(actionIDHex); ok {
+		return v.(*SyntheticDigests), nil
+	}
+
 	cmd := SyntheticCommand(actionIDHex)
 	cmdData, cmdDigest, err := MarshalDeterministic(cmd)
 	if err != nil {
@@ -94,12 +105,14 @@ func ComputeSyntheticDigests(actionIDHex string) (*SyntheticDigests, error) {
 		return nil, err
 	}
 
-	return &SyntheticDigests{
+	sd := &SyntheticDigests{
 		CommandData:   cmdData,
 		CommandDigest: cmdDigest,
 		DirData:       cachedDirData,
 		DirDigest:     cachedDirDigest,
 		ActionData:    actionData,
 		ActionDigest:  actionDigest,
-	}, nil
+	}
+	syntheticCache.Store(actionIDHex, sd)
+	return sd, nil
 }

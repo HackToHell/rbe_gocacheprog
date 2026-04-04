@@ -53,11 +53,7 @@ func WriteMetadata(path string, m *Metadata) error {
 		os.Remove(tmp)
 		return fmt.Errorf("write temp metadata: %w", err)
 	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return fmt.Errorf("sync temp metadata: %w", err)
-	}
+	// Skip fsync: this is a cache — data loss on crash just means a miss.
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("close temp metadata: %w", err)
