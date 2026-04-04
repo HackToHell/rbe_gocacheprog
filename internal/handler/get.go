@@ -2,7 +2,10 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"hash"
+	"io"
 	"os"
 	"time"
 
@@ -142,7 +145,12 @@ func downloadAndInstall(ctx context.Context, dc *cache.DiskCache, client *reapi.
 	}
 	tmpName := tmp.Name()
 
-	if err := client.DownloadBlob(ctx, digest, tmp); err != nil {
+	// Hash inline during download to avoid a second full read of the file.
+	h := reapi.SHA256Pool.Get().(hash.Hash)
+	defer func() { h.Reset(); reapi.SHA256Pool.Put(h) }()
+
+	w := io.MultiWriter(tmp, h)
+	if err := client.DownloadBlob(ctx, digest, w); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
 		return "", err
@@ -152,14 +160,16 @@ func downloadAndInstall(ctx context.Context, dc *cache.DiskCache, client *reapi.
 		return "", err
 	}
 
-	gotDigest, err := reapi.DigestFile(tmpName)
+	var buf [sha256.Size]byte
+	gotHash := reapi.HexEncodeFixed(h.Sum(buf[:0]))
+	info, err := os.Stat(tmpName)
 	if err != nil {
 		os.Remove(tmpName)
 		return "", err
 	}
-	if gotDigest.Hash != digest.Hash || gotDigest.Size != digest.Size {
+	if gotHash != digest.Hash || info.Size() != digest.Size {
 		os.Remove(tmpName)
-		return "", fmt.Errorf("digest mismatch: got %s/%d, want %s/%d", gotDigest.Hash, gotDigest.Size, digest.Hash, digest.Size)
+		return "", fmt.Errorf("digest mismatch: got %s/%d, want %s/%d", gotHash, info.Size(), digest.Hash, digest.Size)
 	}
 
 	return dc.Install(actionIDHex, tmpName, meta)

@@ -53,9 +53,9 @@ func DigestFromProto(pd *repb.Digest) Digest {
 	return Digest{Hash: pd.GetHash(), Size: pd.GetSizeBytes()}
 }
 
-// hexEncodeFixed encodes src into a hex string with zero copy.
+// HexEncodeFixed encodes src into a hex string with zero copy.
 // The returned string directly backs the allocated buffer.
-func hexEncodeFixed(src []byte) string {
+func HexEncodeFixed(src []byte) string {
 	dst := make([]byte, len(src)*2)
 	for i, v := range src {
 		dst[i*2] = hexDigits[v>>4]
@@ -68,7 +68,7 @@ func hexEncodeFixed(src []byte) string {
 func DigestBytes(data []byte) Digest {
 	h := sha256.Sum256(data)
 	return Digest{
-		Hash: hexEncodeFixed(h[:]),
+		Hash: HexEncodeFixed(h[:]),
 		Size: int64(len(data)),
 	}
 }
@@ -92,14 +92,14 @@ func DigestFile(path string) (Digest, error) {
 	}
 	var buf [sha256.Size]byte
 	return Digest{
-		Hash: hexEncodeFixed(h.Sum(buf[:0])),
+		Hash: HexEncodeFixed(h.Sum(buf[:0])),
 		Size: size,
 	}, nil
 }
 
 // HexEncode encodes raw bytes to lowercase hex string.
 func HexEncode(b []byte) string {
-	return hexEncodeFixed(b)
+	return HexEncodeFixed(b)
 }
 
 // HexDecode decodes a hex string to raw bytes.
