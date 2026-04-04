@@ -7,15 +7,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hacktohell/rbe_gocacheprog/internal/config"
+	"github.com/hacktohell/gocache-rbe/internal/config"
 )
 
 func TestLoadFromEnv(t *testing.T) {
-	t.Setenv("GOCACHEPROG_TARGET", "localhost:9092")
-	t.Setenv("GOCACHEPROG_INSTANCE", "test-instance")
-	t.Setenv("GOCACHEPROG_CACHE_SIZE_MB", "512")
-	t.Setenv("GOCACHEPROG_LOG_LEVEL", "debug")
-	t.Setenv("GOCACHEPROG_CACHE_DIR", t.TempDir())
+	t.Setenv("GOCACHE_RBE_TARGET", "localhost:9092")
+	t.Setenv("GOCACHE_RBE_INSTANCE", "test-instance")
+	t.Setenv("GOCACHE_RBE_CACHE_SIZE_MB", "512")
+	t.Setenv("GOCACHE_RBE_LOG_LEVEL", "debug")
+	t.Setenv("GOCACHE_RBE_CACHE_DIR", t.TempDir())
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -37,7 +37,7 @@ func TestLoadFromEnv(t *testing.T) {
 
 func TestLoadMissingTarget(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // prevent real config file from supplying a target
-	t.Setenv("GOCACHEPROG_TARGET", "")
+	t.Setenv("GOCACHE_RBE_TARGET", "")
 	_, err := config.Load()
 	if err == nil {
 		t.Error("expected error when target is missing")
@@ -48,7 +48,7 @@ func TestEnvOverridesFile(t *testing.T) {
 	// Create a temp config file
 	dir := t.TempDir()
 	home := t.TempDir()
-	configDir := filepath.Join(home, ".config", "gocacheprog")
+	configDir := filepath.Join(home, ".config", "gocache-rbe")
 	os.MkdirAll(configDir, 0o700)
 
 	fileCfg := map[string]any{
@@ -61,8 +61,8 @@ func TestEnvOverridesFile(t *testing.T) {
 
 	// Env should override
 	t.Setenv("HOME", home)
-	t.Setenv("GOCACHEPROG_TARGET", "env-target:443")
-	t.Setenv("GOCACHEPROG_CACHE_DIR", dir)
+	t.Setenv("GOCACHE_RBE_TARGET", "env-target:443")
+	t.Setenv("GOCACHE_RBE_CACHE_DIR", dir)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -86,7 +86,7 @@ func TestCacheSizeBytes(t *testing.T) {
 }
 
 func TestDefaults(t *testing.T) {
-	t.Setenv("GOCACHEPROG_TARGET", "localhost:9092")
+	t.Setenv("GOCACHE_RBE_TARGET", "localhost:9092")
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -184,15 +184,15 @@ func TestMaxArtifactSizeBytes(t *testing.T) {
 }
 
 func TestEnvOverridesTLSAndTimeouts(t *testing.T) {
-	t.Setenv("GOCACHEPROG_TARGET", "localhost:9092")
-	t.Setenv("GOCACHEPROG_TLS_CERT", "/path/to/cert.pem")
-	t.Setenv("GOCACHEPROG_TLS_KEY", "/path/to/key.pem")
-	t.Setenv("GOCACHEPROG_TLS_CA", "/path/to/ca.pem")
-	t.Setenv("GOCACHEPROG_WORKERS", "16")
-	t.Setenv("GOCACHEPROG_CONNECT_TIMEOUT", "30s")
-	t.Setenv("GOCACHEPROG_REQUEST_TIMEOUT", "2m")
-	t.Setenv("GOCACHEPROG_MAX_ARTIFACT_SIZE_MB", "256")
-	t.Setenv("GOCACHEPROG_HEALTH_ADDR", ":8080")
+	t.Setenv("GOCACHE_RBE_TARGET", "localhost:9092")
+	t.Setenv("GOCACHE_RBE_TLS_CERT", "/path/to/cert.pem")
+	t.Setenv("GOCACHE_RBE_TLS_KEY", "/path/to/key.pem")
+	t.Setenv("GOCACHE_RBE_TLS_CA", "/path/to/ca.pem")
+	t.Setenv("GOCACHE_RBE_WORKERS", "16")
+	t.Setenv("GOCACHE_RBE_CONNECT_TIMEOUT", "30s")
+	t.Setenv("GOCACHE_RBE_REQUEST_TIMEOUT", "2m")
+	t.Setenv("GOCACHE_RBE_MAX_ARTIFACT_SIZE_MB", "256")
+	t.Setenv("GOCACHE_RBE_HEALTH_ADDR", ":8080")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -226,9 +226,9 @@ func TestEnvOverridesTLSAndTimeouts(t *testing.T) {
 }
 
 func TestLoadAuthHeaderEnvVars(t *testing.T) {
-	t.Setenv("GOCACHEPROG_TARGET", "localhost:9092")
-	t.Setenv("GOCACHEPROG_AUTH_HEADER", "x-buildbuddy-api-key")
-	t.Setenv("GOCACHEPROG_AUTH_TOKEN", "secret-token-abc")
+	t.Setenv("GOCACHE_RBE_TARGET", "localhost:9092")
+	t.Setenv("GOCACHE_RBE_AUTH_HEADER", "x-buildbuddy-api-key")
+	t.Setenv("GOCACHE_RBE_AUTH_TOKEN", "secret-token-abc")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -245,23 +245,23 @@ func TestLoadAuthHeaderEnvVars(t *testing.T) {
 func TestLoadTLSFlagEnvVar(t *testing.T) {
 	for _, val := range []string{"true", "1"} {
 		t.Run(val, func(t *testing.T) {
-			t.Setenv("GOCACHEPROG_TARGET", "localhost:9092")
-			t.Setenv("GOCACHEPROG_TLS", val)
+			t.Setenv("GOCACHE_RBE_TARGET", "localhost:9092")
+			t.Setenv("GOCACHE_RBE_TLS", val)
 
 			cfg, err := config.Load()
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !cfg.TLS {
-				t.Errorf("TLS = false, want true for GOCACHEPROG_TLS=%q", val)
+				t.Errorf("TLS = false, want true for GOCACHE_RBE_TLS=%q", val)
 			}
 		})
 	}
 }
 
 func TestLoadTLSFlagDefaultFalse(t *testing.T) {
-	t.Setenv("GOCACHEPROG_TARGET", "localhost:9092")
-	// GOCACHEPROG_TLS not set
+	t.Setenv("GOCACHE_RBE_TARGET", "localhost:9092")
+	// GOCACHE_RBE_TLS not set
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -274,7 +274,7 @@ func TestLoadTLSFlagDefaultFalse(t *testing.T) {
 
 func TestAuthFromConfigFile(t *testing.T) {
 	home := t.TempDir()
-	configDir := filepath.Join(home, ".config", "gocacheprog")
+	configDir := filepath.Join(home, ".config", "gocache-rbe")
 	os.MkdirAll(configDir, 0o700)
 
 	fileCfg := map[string]any{
@@ -288,7 +288,7 @@ func TestAuthFromConfigFile(t *testing.T) {
 	os.WriteFile(filepath.Join(configDir, "config.json"), data, 0o600)
 
 	t.Setenv("HOME", home)
-	t.Setenv("GOCACHEPROG_TARGET", "grpcs://remote.example.com")
+	t.Setenv("GOCACHE_RBE_TARGET", "grpcs://remote.example.com")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -307,7 +307,7 @@ func TestAuthFromConfigFile(t *testing.T) {
 
 func TestAuthEnvOverridesFile(t *testing.T) {
 	home := t.TempDir()
-	configDir := filepath.Join(home, ".config", "gocacheprog")
+	configDir := filepath.Join(home, ".config", "gocache-rbe")
 	os.MkdirAll(configDir, 0o700)
 
 	fileCfg := map[string]any{
@@ -320,9 +320,9 @@ func TestAuthEnvOverridesFile(t *testing.T) {
 	os.WriteFile(filepath.Join(configDir, "config.json"), data, 0o600)
 
 	t.Setenv("HOME", home)
-	t.Setenv("GOCACHEPROG_TARGET", "localhost:9092")
-	t.Setenv("GOCACHEPROG_AUTH_HEADER", "x-from-env")
-	t.Setenv("GOCACHEPROG_AUTH_TOKEN", "token-from-env")
+	t.Setenv("GOCACHE_RBE_TARGET", "localhost:9092")
+	t.Setenv("GOCACHE_RBE_AUTH_HEADER", "x-from-env")
+	t.Setenv("GOCACHE_RBE_AUTH_TOKEN", "token-from-env")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -337,11 +337,11 @@ func TestAuthEnvOverridesFile(t *testing.T) {
 }
 
 func TestEnvInvalidValuesIgnored(t *testing.T) {
-	t.Setenv("GOCACHEPROG_TARGET", "localhost:9092")
-	t.Setenv("GOCACHEPROG_WORKERS", "not-a-number")
-	t.Setenv("GOCACHEPROG_CACHE_SIZE_MB", "bad")
-	t.Setenv("GOCACHEPROG_CONNECT_TIMEOUT", "invalid-duration")
-	t.Setenv("GOCACHEPROG_MAX_ARTIFACT_SIZE_MB", "nope")
+	t.Setenv("GOCACHE_RBE_TARGET", "localhost:9092")
+	t.Setenv("GOCACHE_RBE_WORKERS", "not-a-number")
+	t.Setenv("GOCACHE_RBE_CACHE_SIZE_MB", "bad")
+	t.Setenv("GOCACHE_RBE_CONNECT_TIMEOUT", "invalid-duration")
+	t.Setenv("GOCACHE_RBE_MAX_ARTIFACT_SIZE_MB", "nope")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -365,7 +365,7 @@ func TestEnvInvalidValuesIgnored(t *testing.T) {
 
 func TestConfigFileWithDurations(t *testing.T) {
 	home := t.TempDir()
-	configDir := filepath.Join(home, ".config", "gocacheprog")
+	configDir := filepath.Join(home, ".config", "gocache-rbe")
 	os.MkdirAll(configDir, 0o700)
 
 	fileCfg := map[string]any{
@@ -379,12 +379,12 @@ func TestConfigFileWithDurations(t *testing.T) {
 
 	t.Setenv("HOME", home)
 	// Don't set TARGET env var so file value is used
-	t.Setenv("GOCACHEPROG_TARGET", "")
+	t.Setenv("GOCACHE_RBE_TARGET", "")
 
 	// This will fail because the file's target will be used but then
 	// env var overrides with empty string. The load function requires target.
 	// Set the env var to the same value.
-	t.Setenv("GOCACHEPROG_TARGET", "grpc-server:443")
+	t.Setenv("GOCACHE_RBE_TARGET", "grpc-server:443")
 
 	cfg, err := config.Load()
 	if err != nil {

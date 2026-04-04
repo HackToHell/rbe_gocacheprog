@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hacktohell/rbe_gocacheprog/internal/cache"
+	"github.com/hacktohell/gocache-rbe/internal/cache"
 )
 
 func newTestCache(t *testing.T, maxSize int64) *cache.DiskCache {

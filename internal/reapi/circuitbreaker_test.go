@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hacktohell/rbe_gocacheprog/internal/reapi"
+	"github.com/hacktohell/gocache-rbe/internal/reapi"
 )
 
 func TestCircuitBreakerFullLifecycle(t *testing.T) {

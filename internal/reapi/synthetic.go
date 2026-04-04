@@ -24,10 +24,10 @@ func init() {
 }
 
 // SyntheticCommand builds a deterministic Command proto from an ActionID hex string.
-// Command { arguments: ["gocacheprog", "<actionIDHex>"] }
+// Command { arguments: ["gocache-rbe", "<actionIDHex>"] }
 func SyntheticCommand(actionIDHex string) *repb.Command {
 	return &repb.Command{
-		Arguments: []string{"gocacheprog", actionIDHex},
+		Arguments: []string{"gocache-rbe", actionIDHex},
 	}
 }
 

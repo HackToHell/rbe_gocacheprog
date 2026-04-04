@@ -1,9 +1,9 @@
 .PHONY: build test bench bench-image bench-run bench-clean
 
-bin/gocacheprog: $(shell find cmd internal -name '*.go')
-	go build -o $@ ./cmd/gocacheprog
+bin/gocache-rbe: $(shell find cmd internal -name '*.go')
+	go build -o $@ ./cmd/gocache-rbe
 
-build: bin/gocacheprog
+build: bin/gocache-rbe
 
 test:
 	go test ./...

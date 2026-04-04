@@ -5,12 +5,12 @@ set -euo pipefail
 BUILD_TARGETS="${K8S_BUILD_TARGETS:-./cmd/kubectl/... ./cmd/kubeadm/...}"
 RESULTS_DIR="/results"
 K8S_DIR="/src/k8s"
-LOCAL_CACHE_DIR="${GOCACHEPROG_CACHE_DIR:-/tmp/gocacheprog-cache}"
+LOCAL_CACHE_DIR="${GOCACHE_RBE_CACHE_DIR:-/tmp/gocache-rbe-cache}"
 
 mkdir -p "$RESULTS_DIR"
 
 # Wait for bazel-remote to be ready
-REMOTE_HOST="${GOCACHEPROG_TARGET:-bazel-remote:9092}"
+REMOTE_HOST="${GOCACHE_RBE_TARGET:-bazel-remote:9092}"
 REMOTE_HTTP_HOST="${REMOTE_HOST%%:*}:8080"
 echo "Waiting for bazel-remote at $REMOTE_HTTP_HOST..."
 for i in $(seq 1 30); do
@@ -25,14 +25,14 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-# Create a wrapper script that redirects gocacheprog stderr to a log file
+# Create a wrapper script that redirects gocache-rbe stderr to a log file
 # while preserving stdin/stdout for the go tool protocol.
 create_wrapper() {
     local logfile="$1"
-    local wrapper="/tmp/gocacheprog-wrapper.sh"
+    local wrapper="/tmp/gocache-rbe-wrapper.sh"
     cat > "$wrapper" <<WRAPPER
 #!/usr/bin/env bash
-exec /usr/local/bin/gocacheprog 2>>"$logfile"
+exec /usr/local/bin/gocache-rbe 2>>"$logfile"
 WRAPPER
     chmod +x "$wrapper"
     echo "$wrapper"
@@ -49,7 +49,7 @@ parse_time() {
     echo "$wall|$user|$sys|$rss"
 }
 
-# Parse gocacheprog JSON logs for hit/miss counts.
+# Parse gocache-rbe JSON logs for hit/miss counts.
 parse_cacheprog_stats() {
     local logfile="$1"
     if [ ! -f "$logfile" ] || [ ! -s "$logfile" ]; then
@@ -81,17 +81,17 @@ run_build() {
     echo "=== Scenario $scenario ($slug) ==="
 
     if [ "$use_cacheprog" = "yes" ]; then
-        local logfile="$RESULTS_DIR/${scenario}.${slug}.gocacheprog.log"
+        local logfile="$RESULTS_DIR/${scenario}.${slug}.gocache-rbe.log"
         local profilefile="$RESULTS_DIR/${scenario}.${slug}.cpu.pprof"
         > "$logfile"
         local wrapper
         wrapper=$(create_wrapper "$logfile")
         export GOCACHEPROG="$wrapper"
-        export GOCACHEPROG_CPUPROFILE="$profilefile"
-        echo "  Using gocacheprog (logs -> $logfile, profile -> $profilefile)"
+        export GOCACHE_RBE_CPUPROFILE="$profilefile"
+        echo "  Using gocache-rbe (logs -> $logfile, profile -> $profilefile)"
     else
         unset GOCACHEPROG 2>/dev/null || true
-        unset GOCACHEPROG_CPUPROFILE 2>/dev/null || true
+        unset GOCACHE_RBE_CPUPROFILE 2>/dev/null || true
         echo "  Using default go cache"
     fi
 
@@ -101,7 +101,7 @@ run_build() {
         cat "$timefile"
         return 1
     }
-    unset GOCACHEPROG_CPUPROFILE 2>/dev/null || true
+    unset GOCACHE_RBE_CPUPROFILE 2>/dev/null || true
     echo "  Done."
 }
 
@@ -111,7 +111,7 @@ clean_go_cache() {
 }
 
 clean_local_cacheprog() {
-    echo "  Cleaning local gocacheprog cache..."
+    echo "  Cleaning local gocache-rbe cache..."
     rm -rf "$LOCAL_CACHE_DIR"
     mkdir -p "$LOCAL_CACHE_DIR"
 }
@@ -130,7 +130,7 @@ populate_remote() {
     local wrapper
     wrapper=$(create_wrapper "/dev/null")
     export GOCACHEPROG="$wrapper"
-    unset GOCACHEPROG_CPUPROFILE 2>/dev/null || true
+    unset GOCACHE_RBE_CPUPROFILE 2>/dev/null || true
     cd "$K8S_DIR"
     go build "$target"
     echo "  Remote cache populated for $slug."
@@ -146,10 +146,10 @@ for BUILD_TARGET in $BUILD_TARGETS; do
     echo "  Target: $BUILD_TARGET  (slug: $SLUG)"
     echo "############################################"
 
-    # ---------- Scenario D: gocacheprog, both caches cold ----------
+    # ---------- Scenario D: gocache-rbe, both caches cold ----------
     echo ""
     echo "============================================"
-    echo "  Scenario D ($SLUG): gocacheprog, both caches cold"
+    echo "  Scenario D ($SLUG): gocache-rbe, both caches cold"
     echo "============================================"
     clean_go_cache
     clean_local_cacheprog
@@ -158,10 +158,10 @@ for BUILD_TARGET in $BUILD_TARGETS; do
     # ---------- Populate remote cache ----------
     populate_remote "$BUILD_TARGET"
 
-    # ---------- Scenario C: gocacheprog, cold local, warm remote ----------
+    # ---------- Scenario C: gocache-rbe, cold local, warm remote ----------
     echo ""
     echo "============================================"
-    echo "  Scenario C ($SLUG): gocacheprog, warm remote"
+    echo "  Scenario C ($SLUG): gocache-rbe, warm remote"
     echo "============================================"
     clean_go_cache
     clean_local_cacheprog
@@ -225,7 +225,7 @@ for BUILD_TARGET in $BUILD_TARGETS; do
             "------------" "----------" "----------" "----------"
 
         for scenario in D C; do
-            logfile="$RESULTS_DIR/${scenario}.${SLUG}.gocacheprog.log"
+            logfile="$RESULTS_DIR/${scenario}.${SLUG}.gocache-rbe.log"
             IFS='|' read -r gets puts misses <<< "$(parse_cacheprog_stats "$logfile")"
             printf "%-12s | %-10s | %-10s | %-10s\n" "$scenario" "$gets" "$puts" "$misses"
         done
@@ -238,8 +238,8 @@ echo "" | tee -a "$RESULTS_DIR/summary.txt"
     echo "Legend:"
     echo "  A = Default go cache, cold (baseline full compile)"
     echo "  B = Default go cache, warm (best-case local)"
-    echo "  C = gocacheprog, cold local + warm remote (remote fetch)"
-    echo "  D = gocacheprog, both cold (full compile + remote upload)"
+    echo "  C = gocache-rbe, cold local + warm remote (remote fetch)"
+    echo "  D = gocache-rbe, both cold (full compile + remote upload)"
     echo ""
     echo "Key comparisons:"
     echo "  C < A  => remote cache provides speedup"
@@ -261,7 +261,7 @@ for pprof_file in "$RESULTS_DIR"/*.cpu.pprof; do
     label=$(basename "$pprof_file" .cpu.pprof)
     echo "--- Profile: $label ---" | tee -a "$RESULTS_DIR/summary.txt"
     go tool pprof -top -nodecount=20 "$pprof_file" 2>/dev/null | tee -a "$RESULTS_DIR/summary.txt" || \
-        echo "  (profile empty or gocacheprog exited before sampling)" | tee -a "$RESULTS_DIR/summary.txt"
+        echo "  (profile empty or gocache-rbe exited before sampling)" | tee -a "$RESULTS_DIR/summary.txt"
     echo "" | tee -a "$RESULTS_DIR/summary.txt"
 done
 

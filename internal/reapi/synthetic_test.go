@@ -3,7 +3,7 @@ package reapi_test
 import (
 	"testing"
 
-	"github.com/hacktohell/rbe_gocacheprog/internal/reapi"
+	"github.com/hacktohell/gocache-rbe/internal/reapi"
 )
 
 func TestSyntheticDeterminism(t *testing.T) {

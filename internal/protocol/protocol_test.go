@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hacktohell/rbe_gocacheprog/internal/protocol"
+	"github.com/hacktohell/gocache-rbe/internal/protocol"
 )
 
 func TestHandshake(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hacktohell/rbe_gocacheprog/internal/cache"
+	"github.com/hacktohell/gocache-rbe/internal/cache"
 )
 
 func TestTrimEvictsColdEntries(t *testing.T) {

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	"github.com/hacktohell/rbe_gocacheprog/internal/reapi"
-	"github.com/hacktohell/rbe_gocacheprog/testutil/fakereapi"
+	"github.com/hacktohell/gocache-rbe/internal/reapi"
+	"github.com/hacktohell/gocache-rbe/testutil/fakereapi"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"

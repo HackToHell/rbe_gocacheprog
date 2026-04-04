@@ -19,13 +19,13 @@ services:
       bazel-remote:
         condition: service_started
     environment:
-      GOCACHEPROG_TARGET: "bazel-remote:9092"
-      GOCACHEPROG_INSTANCE: ""
-      GOCACHEPROG_CACHE_DIR: "/tmp/gocacheprog-cache"
-      GOCACHEPROG_CACHE_SIZE_MB: "10240"
-      GOCACHEPROG_LOG_LEVEL: "info"
-      GOCACHEPROG_CONNECT_TIMEOUT: "30s"
-      GOCACHEPROG_REQUEST_TIMEOUT: "120s"
+      GOCACHE_RBE_TARGET: "bazel-remote:9092"
+      GOCACHE_RBE_INSTANCE: ""
+      GOCACHE_RBE_CACHE_DIR: "/tmp/gocache-rbe-cache"
+      GOCACHE_RBE_CACHE_SIZE_MB: "10240"
+      GOCACHE_RBE_LOG_LEVEL: "info"
+      GOCACHE_RBE_CONNECT_TIMEOUT: "30s"
+      GOCACHE_RBE_REQUEST_TIMEOUT: "120s"
       K8S_BUILD_TARGETS: "${K8S_BUILD_TARGETS:-./cmd/kubectl/... ./cmd/kubeadm/...}"
     volumes:
       - ./results:/results

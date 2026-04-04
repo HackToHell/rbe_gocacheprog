@@ -1,4 +1,4 @@
-# rbe_gocacheprog
+# gocache-rbe
 
 A [GOCACHEPROG](https://go.dev/doc/go1.24#go-command) helper that stores Go build cache artifacts in a remote [REAPI v2](https://github.com/bazelbuild/remote-apis) Content Addressable Storage (CAS) and Action Cache.
 
@@ -7,7 +7,7 @@ This lets teams share compiled artifacts across machines via a remote cache serv
 ## How it works
 
 ```
-cmd/go <-- JSON over stdin/stdout --> gocacheprog <-- gRPC --> REAPI v2 server
+cmd/go <-- JSON over stdin/stdout --> gocache-rbe <-- gRPC --> REAPI v2 server
                                           |
                                      local disk cache
 ```
@@ -24,16 +24,16 @@ cmd/go <-- JSON over stdin/stdout --> gocacheprog <-- gRPC --> REAPI v2 server
 ## Install
 
 ```bash
-go install github.com/hacktohell/rbe_gocacheprog/cmd/gocacheprog@latest
+go install github.com/hacktohell/gocache-rbe/cmd/gocache-rbe@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/hacktohell/rbe_gocacheprog.git
-cd rbe_gocacheprog
+git clone https://github.com/hacktohell/gocache-rbe.git
+cd gocache-rbe
 make build
-# binary at bin/gocacheprog
+# binary at bin/gocache-rbe
 ```
 
 ## Usage
@@ -41,12 +41,12 @@ make build
 Set the `GOCACHEPROG` environment variable to the binary path:
 
 ```bash
-export GOCACHEPROG_TARGET="localhost:9092"
-export GOCACHEPROG="$(which gocacheprog)"
+export GOCACHE_RBE_TARGET="localhost:9092"
+export GOCACHEPROG="$(which gocache-rbe)"
 go build ./...
 ```
 
-That's it. All `go build`, `go test`, and `go install` commands will use gocacheprog automatically.
+That's it. All `go build`, `go test`, and `go install` commands will use gocache-rbe automatically.
 
 ## Configuration
 
@@ -54,7 +54,7 @@ Configuration is loaded with precedence: **environment variables > config file >
 
 ### Target format
 
-The `target` field (and `GOCACHEPROG_TARGET` env var) accepts three forms:
+The `target` field (and `GOCACHE_RBE_TARGET` env var) accepts three forms:
 
 | Format | TLS | Default port |
 |---|---|---|
@@ -66,25 +66,25 @@ The `target` field (and `GOCACHEPROG_TARGET` env var) accepts three forms:
 
 | Variable | Description | Default |
 |---|---|---|
-| `GOCACHEPROG_TARGET` | gRPC address of the REAPI server — see target format above (required) | - |
-| `GOCACHEPROG_INSTANCE` | REAPI instance name | `""` |
-| `GOCACHEPROG_CACHE_DIR` | Local disk cache directory | `~/.cache/gocacheprog` |
-| `GOCACHEPROG_CACHE_SIZE_MB` | Local cache size limit in MB | `10240` (10 GB) |
-| `GOCACHEPROG_TLS` | Enable TLS with system CAs for bare `host:port` targets (`true`/`1`) | - |
-| `GOCACHEPROG_TLS_CERT` | Path to TLS client certificate (mTLS) | - |
-| `GOCACHEPROG_TLS_KEY` | Path to TLS client key (mTLS) | - |
-| `GOCACHEPROG_TLS_CA` | Path to custom TLS CA certificate | - |
-| `GOCACHEPROG_AUTH_HEADER` | gRPC metadata key to send on every request (e.g. `x-buildbuddy-api-key`) | - |
-| `GOCACHEPROG_AUTH_TOKEN` | Value for the auth header | - |
-| `GOCACHEPROG_WORKERS` | Number of concurrent request workers | `GOMAXPROCS * 2` |
-| `GOCACHEPROG_CONNECT_TIMEOUT` | gRPC connection timeout | `10s` |
-| `GOCACHEPROG_REQUEST_TIMEOUT` | Per-request timeout | `60s` |
-| `GOCACHEPROG_LOG_LEVEL` | Log level: `debug`, `info`, `warn`, `error` | `info` |
-| `GOCACHEPROG_METRICS_ADDR` | Prometheus metrics listen address (e.g., `:9090`) | - (disabled) |
+| `GOCACHE_RBE_TARGET` | gRPC address of the REAPI server — see target format above (required) | - |
+| `GOCACHE_RBE_INSTANCE` | REAPI instance name | `""` |
+| `GOCACHE_RBE_CACHE_DIR` | Local disk cache directory | `~/.cache/gocache-rbe` |
+| `GOCACHE_RBE_CACHE_SIZE_MB` | Local cache size limit in MB | `10240` (10 GB) |
+| `GOCACHE_RBE_TLS` | Enable TLS with system CAs for bare `host:port` targets (`true`/`1`) | - |
+| `GOCACHE_RBE_TLS_CERT` | Path to TLS client certificate (mTLS) | - |
+| `GOCACHE_RBE_TLS_KEY` | Path to TLS client key (mTLS) | - |
+| `GOCACHE_RBE_TLS_CA` | Path to custom TLS CA certificate | - |
+| `GOCACHE_RBE_AUTH_HEADER` | gRPC metadata key to send on every request (e.g. `x-buildbuddy-api-key`) | - |
+| `GOCACHE_RBE_AUTH_TOKEN` | Value for the auth header | - |
+| `GOCACHE_RBE_WORKERS` | Number of concurrent request workers | `GOMAXPROCS * 2` |
+| `GOCACHE_RBE_CONNECT_TIMEOUT` | gRPC connection timeout | `10s` |
+| `GOCACHE_RBE_REQUEST_TIMEOUT` | Per-request timeout | `60s` |
+| `GOCACHE_RBE_LOG_LEVEL` | Log level: `debug`, `info`, `warn`, `error` | `info` |
+| `GOCACHE_RBE_METRICS_ADDR` | Prometheus metrics listen address (e.g., `:9090`) | - (disabled) |
 
 ### Config file
 
-Optional JSON config at `~/.config/gocacheprog/config.json`:
+Optional JSON config at `~/.config/gocache-rbe/config.json`:
 
 ```json
 {
@@ -111,22 +111,22 @@ docker run -d --name bazel-remote \
   --dir=/data --max_size=20 --storage_mode=uncompressed
 ```
 
-Build with gocacheprog:
+Build with gocache-rbe:
 
 ```bash
-export GOCACHEPROG_TARGET="localhost:9092"
-export GOCACHEPROG_INSTANCE=""
-export GOCACHEPROG="$(which gocacheprog)"
+export GOCACHE_RBE_TARGET="localhost:9092"
+export GOCACHE_RBE_INSTANCE=""
+export GOCACHEPROG="$(which gocache-rbe)"
 go build ./...
 ```
 
 ## BuildBuddy
 
-[BuildBuddy](https://www.buildbuddy.io/) is a hosted REAPI v2 remote cache that works out of the box with gocacheprog.
+[BuildBuddy](https://www.buildbuddy.io/) is a hosted REAPI v2 remote cache that works out of the box with gocache-rbe.
 
 **1. Get your API key** from the [BuildBuddy settings page](https://app.buildbuddy.io/settings/).
 
-**2. Create `~/.config/gocacheprog/config.json`:**
+**2. Create `~/.config/gocache-rbe/config.json`:**
 
 ```json
 {
@@ -138,20 +138,20 @@ go build ./...
 
 The `grpcs://` scheme automatically enables TLS with system CAs and sets port 443 — no extra TLS config needed.
 
-**3. Enable gocacheprog:**
+**3. Enable gocache-rbe:**
 
 ```bash
-export GOCACHEPROG="$(which gocacheprog)"
+export GOCACHEPROG="$(which gocache-rbe)"
 go build ./...
 ```
 
 Or via environment variables without a config file:
 
 ```bash
-export GOCACHEPROG_TARGET="grpcs://remote.buildbuddy.io"
-export GOCACHEPROG_AUTH_HEADER="x-buildbuddy-api-key"
-export GOCACHEPROG_AUTH_TOKEN="<YOUR_API_KEY>"
-export GOCACHEPROG="$(which gocacheprog)"
+export GOCACHE_RBE_TARGET="grpcs://remote.buildbuddy.io"
+export GOCACHE_RBE_AUTH_HEADER="x-buildbuddy-api-key"
+export GOCACHE_RBE_AUTH_TOKEN="<YOUR_API_KEY>"
+export GOCACHEPROG="$(which gocache-rbe)"
 go build ./...
 ```
 
@@ -162,10 +162,10 @@ Build results and cache stats are visible in the [BuildBuddy UI](https://app.bui
 For mTLS connections to the remote cache:
 
 ```bash
-export GOCACHEPROG_TARGET="build-cache.example.com:9092"
-export GOCACHEPROG_TLS_CERT="/path/to/client-cert.pem"
-export GOCACHEPROG_TLS_KEY="/path/to/client-key.pem"
-export GOCACHEPROG_TLS_CA="/path/to/ca.pem"
+export GOCACHE_RBE_TARGET="build-cache.example.com:9092"
+export GOCACHE_RBE_TLS_CERT="/path/to/client-cert.pem"
+export GOCACHE_RBE_TLS_KEY="/path/to/client-key.pem"
+export GOCACHE_RBE_TLS_CA="/path/to/ca.pem"
 ```
 
 ## Metrics
@@ -173,7 +173,7 @@ export GOCACHEPROG_TLS_CA="/path/to/ca.pem"
 Enable Prometheus metrics:
 
 ```bash
-export GOCACHEPROG_METRICS_ADDR=":9090"
+export GOCACHE_RBE_METRICS_ADDR=":9090"
 ```
 
 Metrics are served at `http://localhost:9090/metrics`.
@@ -190,8 +190,8 @@ This builds kubectl with 4 cache scenarios and produces a comparison table:
 
 | Scenario | Description |
 |---|---|
-| D | gocacheprog, both caches cold |
-| C | gocacheprog, cold local + warm remote |
+| D | gocache-rbe, both caches cold |
+| C | gocache-rbe, cold local + warm remote |
 | A | default go cache, cold |
 | B | default go cache, warm |
 
@@ -199,14 +199,14 @@ Sample results building `./cmd/kubectl/...` from Kubernetes v1.32.0 (AMD EPYC 7B
 
 | Scenario | Wall Clock | User CPU | Sys CPU | Peak RSS |
 |---|---|---|---|---|
-| D - cacheprog, both cold | 34.8s | 248.3s | 61.6s | 1,081 MB |
-| C - cacheprog, warm remote | **2.6s** | 1.7s | 1.3s | 67 MB |
+| D - gocache-rbe, both cold | 34.8s | 248.3s | 61.6s | 1,081 MB |
+| C - gocache-rbe, warm remote | **2.6s** | 1.7s | 1.3s | 67 MB |
 | A - default go cache, cold | 21.3s | 242.7s | 58.0s | 460 MB |
 | B - default go cache, warm | 0.4s | 1.4s | 1.3s | 76 MB |
 
 Key takeaways:
 - **C vs A**: remote cache is **~8x faster** than a cold compile
-- **D vs A**: cold cacheprog adds ~13s overhead from gRPC upload
+- **D vs A**: cold gocache-rbe adds ~13s overhead from gRPC upload
 - **C vs B**: remote fetch is ~6x slower than local warm cache (network vs disk)
 
 ### Unit benchmarks

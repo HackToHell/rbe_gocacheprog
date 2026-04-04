@@ -6,12 +6,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq time curl git && \
     rm -rf /var/lib/apt/lists/*
 
-# Build gocacheprog
-WORKDIR /src/gocacheprog
+# Build gocache-rbe
+WORKDIR /src/gocache-rbe
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -o /usr/local/bin/gocacheprog ./cmd/gocacheprog
+RUN go build -o /usr/local/bin/gocache-rbe ./cmd/gocache-rbe
 
 # Clone k8s at pinned tag and pre-download modules
 WORKDIR /src

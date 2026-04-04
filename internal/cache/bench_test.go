@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hacktohell/rbe_gocacheprog/internal/cache"
+	"github.com/hacktohell/gocache-rbe/internal/cache"
 )
 
 // --- Path computation (called every get/put) ---

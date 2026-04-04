@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hacktohell/rbe_gocacheprog/internal/protocol"
+	"github.com/hacktohell/gocache-rbe/internal/protocol"
 )
 
 // --- Reader benchmarks ---

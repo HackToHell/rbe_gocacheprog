@@ -1,4 +1,4 @@
-module github.com/hacktohell/rbe_gocacheprog
+module github.com/hacktohell/gocache-rbe
 
 go 1.26.1
 

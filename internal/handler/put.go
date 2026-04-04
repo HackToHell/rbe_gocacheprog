@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hacktohell/rbe_gocacheprog/internal/cache"
-	"github.com/hacktohell/rbe_gocacheprog/internal/protocol"
-	"github.com/hacktohell/rbe_gocacheprog/internal/reapi"
+	"github.com/hacktohell/gocache-rbe/internal/cache"
+	"github.com/hacktohell/gocache-rbe/internal/protocol"
+	"github.com/hacktohell/gocache-rbe/internal/reapi"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

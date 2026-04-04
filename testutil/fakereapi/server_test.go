@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-	"github.com/hacktohell/rbe_gocacheprog/testutil/fakereapi"
+	"github.com/hacktohell/gocache-rbe/testutil/fakereapi"
 	"google.golang.org/genproto/googleapis/bytestream"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

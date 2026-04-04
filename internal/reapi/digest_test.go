@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hacktohell/rbe_gocacheprog/internal/reapi"
+	"github.com/hacktohell/gocache-rbe/internal/reapi"
 )
 
 func TestDigestBytes(t *testing.T) {

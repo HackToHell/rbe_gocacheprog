@@ -10,11 +10,11 @@ import (
 	"runtime/pprof"
 	"syscall"
 
-	"github.com/hacktohell/rbe_gocacheprog/internal/cache"
-	"github.com/hacktohell/rbe_gocacheprog/internal/config"
-	"github.com/hacktohell/rbe_gocacheprog/internal/handler"
-	"github.com/hacktohell/rbe_gocacheprog/internal/protocol"
-	"github.com/hacktohell/rbe_gocacheprog/internal/reapi"
+	"github.com/hacktohell/gocache-rbe/internal/cache"
+	"github.com/hacktohell/gocache-rbe/internal/config"
+	"github.com/hacktohell/gocache-rbe/internal/handler"
+	"github.com/hacktohell/gocache-rbe/internal/protocol"
+	"github.com/hacktohell/gocache-rbe/internal/reapi"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -29,7 +29,7 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	if profilePath := os.Getenv("GOCACHEPROG_CPUPROFILE"); profilePath != "" {
+	if profilePath := os.Getenv("GOCACHE_RBE_CPUPROFILE"); profilePath != "" {
 		f, err := os.Create(profilePath)
 		if err != nil {
 			return fmt.Errorf("create cpu profile: %w", err)

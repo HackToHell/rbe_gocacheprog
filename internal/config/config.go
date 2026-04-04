@@ -1,4 +1,4 @@
-// Package config loads gocacheprog configuration from environment variables and config file.
+// Package config loads gocache-rbe configuration from environment variables and config file.
 package config
 
 import (
@@ -43,7 +43,7 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.Duration.String())
 }
 
-// Config holds all gocacheprog configuration.
+// Config holds all gocache-rbe configuration.
 type Config struct {
 	Target            string   `json:"target"`
 	InstanceName      string   `json:"instance_name"`
@@ -77,7 +77,7 @@ func Load() (*Config, error) {
 	applyEnv(cfg)
 
 	if cfg.Target == "" {
-		return nil, fmt.Errorf("GOCACHEPROG_TARGET is required")
+		return nil, fmt.Errorf("GOCACHE_RBE_TARGET is required")
 	}
 
 	return cfg, nil
@@ -87,7 +87,7 @@ func defaults() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
 		InstanceName:      "",
-		CacheDir:          filepath.Join(home, ".cache", "gocacheprog"),
+		CacheDir:          filepath.Join(home, ".cache", "gocache-rbe"),
 		CacheSizeMB:       10240,
 		Workers:           runtime.GOMAXPROCS(0) * 2,
 		ConnectTimeout:    Duration{10 * time.Second},
@@ -99,7 +99,7 @@ func defaults() *Config {
 
 func configFilePath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "gocacheprog", "config.json")
+	return filepath.Join(home, ".config", "gocache-rbe", "config.json")
 }
 
 func loadFile(cfg *Config) error {
@@ -111,62 +111,62 @@ func loadFile(cfg *Config) error {
 }
 
 func applyEnv(cfg *Config) {
-	if v := os.Getenv("GOCACHEPROG_TARGET"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_TARGET"); v != "" {
 		cfg.Target = v
 	}
-	if v := os.Getenv("GOCACHEPROG_INSTANCE"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_INSTANCE"); v != "" {
 		cfg.InstanceName = v
 	}
-	if v := os.Getenv("GOCACHEPROG_CACHE_DIR"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_CACHE_DIR"); v != "" {
 		cfg.CacheDir = v
 	}
-	if v := os.Getenv("GOCACHEPROG_CACHE_SIZE_MB"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_CACHE_SIZE_MB"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			cfg.CacheSizeMB = n
 		}
 	}
-	if v := os.Getenv("GOCACHEPROG_TLS_CERT"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_TLS_CERT"); v != "" {
 		cfg.TLSCert = v
 	}
-	if v := os.Getenv("GOCACHEPROG_TLS_KEY"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_TLS_KEY"); v != "" {
 		cfg.TLSKey = v
 	}
-	if v := os.Getenv("GOCACHEPROG_TLS_CA"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_TLS_CA"); v != "" {
 		cfg.TLSCA = v
 	}
-	if v := os.Getenv("GOCACHEPROG_WORKERS"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_WORKERS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.Workers = n
 		}
 	}
-	if v := os.Getenv("GOCACHEPROG_CONNECT_TIMEOUT"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_CONNECT_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.ConnectTimeout = Duration{d}
 		}
 	}
-	if v := os.Getenv("GOCACHEPROG_REQUEST_TIMEOUT"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_REQUEST_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.RequestTimeout = Duration{d}
 		}
 	}
-	if v := os.Getenv("GOCACHEPROG_LOG_LEVEL"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_LOG_LEVEL"); v != "" {
 		cfg.LogLevel = v
 	}
-	if v := os.Getenv("GOCACHEPROG_MAX_ARTIFACT_SIZE_MB"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_MAX_ARTIFACT_SIZE_MB"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			cfg.MaxArtifactSizeMB = n
 		}
 	}
-	if v := os.Getenv("GOCACHEPROG_HEALTH_ADDR"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_HEALTH_ADDR"); v != "" {
 		cfg.HealthAddr = v
 	}
-	if v := os.Getenv("GOCACHEPROG_TLS"); v == "true" || v == "1" {
+	if v := os.Getenv("GOCACHE_RBE_TLS"); v == "true" || v == "1" {
 		cfg.TLS = true
 	}
-	if v := os.Getenv("GOCACHEPROG_AUTH_HEADER"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_AUTH_HEADER"); v != "" {
 		cfg.AuthHeader = v
 	}
-	if v := os.Getenv("GOCACHEPROG_AUTH_TOKEN"); v != "" {
+	if v := os.Getenv("GOCACHE_RBE_AUTH_TOKEN"); v != "" {
 		cfg.AuthToken = v
 	}
 }
