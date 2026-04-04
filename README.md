@@ -52,17 +52,30 @@ That's it. All `go build`, `go test`, and `go install` commands will use gocache
 
 Configuration is loaded with precedence: **environment variables > config file > defaults**.
 
+### Target format
+
+The `target` field (and `GOCACHEPROG_TARGET` env var) accepts three forms:
+
+| Format | TLS | Default port |
+|---|---|---|
+| `grpcs://host[:port]` | yes (system CAs) | 443 |
+| `grpc://host[:port]` | no | 80 |
+| `host:port` | from `tls` field | — |
+
 ### Environment variables
 
 | Variable | Description | Default |
 |---|---|---|
-| `GOCACHEPROG_TARGET` | gRPC address of the REAPI server (required) | - |
-| `GOCACHEPROG_INSTANCE` | REAPI instance name | `juls` |
+| `GOCACHEPROG_TARGET` | gRPC address of the REAPI server — see target format above (required) | - |
+| `GOCACHEPROG_INSTANCE` | REAPI instance name | `""` |
 | `GOCACHEPROG_CACHE_DIR` | Local disk cache directory | `~/.cache/gocacheprog` |
 | `GOCACHEPROG_CACHE_SIZE_MB` | Local cache size limit in MB | `10240` (10 GB) |
-| `GOCACHEPROG_TLS_CERT` | Path to TLS client certificate | - |
-| `GOCACHEPROG_TLS_KEY` | Path to TLS client key | - |
-| `GOCACHEPROG_TLS_CA` | Path to TLS CA certificate | - |
+| `GOCACHEPROG_TLS` | Enable TLS with system CAs for bare `host:port` targets (`true`/`1`) | - |
+| `GOCACHEPROG_TLS_CERT` | Path to TLS client certificate (mTLS) | - |
+| `GOCACHEPROG_TLS_KEY` | Path to TLS client key (mTLS) | - |
+| `GOCACHEPROG_TLS_CA` | Path to custom TLS CA certificate | - |
+| `GOCACHEPROG_AUTH_HEADER` | gRPC metadata key to send on every request (e.g. `x-buildbuddy-api-key`) | - |
+| `GOCACHEPROG_AUTH_TOKEN` | Value for the auth header | - |
 | `GOCACHEPROG_WORKERS` | Number of concurrent request workers | `GOMAXPROCS * 2` |
 | `GOCACHEPROG_CONNECT_TIMEOUT` | gRPC connection timeout | `10s` |
 | `GOCACHEPROG_REQUEST_TIMEOUT` | Per-request timeout | `60s` |
@@ -75,14 +88,15 @@ Optional JSON config at `~/.config/gocacheprog/config.json`:
 
 ```json
 {
-  "target": "build-cache.example.com:9092",
+  "target": "grpcs://build-cache.example.com",
   "instance_name": "default",
   "cache_size_mb": 20480,
+  "auth_header": "authorization",
+  "auth_token": "Bearer <token>",
   "tls_cert": "/path/to/cert.pem",
   "tls_key": "/path/to/key.pem",
   "tls_ca": "/path/to/ca.pem",
-  "log_level": "info",
-  "metrics_addr": ":9090"
+  "log_level": "info"
 }
 ```
 
@@ -105,6 +119,43 @@ export GOCACHEPROG_INSTANCE=""
 export GOCACHEPROG="$(which gocacheprog)"
 go build ./...
 ```
+
+## BuildBuddy
+
+[BuildBuddy](https://www.buildbuddy.io/) is a hosted REAPI v2 remote cache that works out of the box with gocacheprog.
+
+**1. Get your API key** from the [BuildBuddy settings page](https://app.buildbuddy.io/settings/).
+
+**2. Create `~/.config/gocacheprog/config.json`:**
+
+```json
+{
+  "target": "grpcs://remote.buildbuddy.io",
+  "auth_header": "x-buildbuddy-api-key",
+  "auth_token": "<YOUR_API_KEY>"
+}
+```
+
+The `grpcs://` scheme automatically enables TLS with system CAs and sets port 443 — no extra TLS config needed.
+
+**3. Enable gocacheprog:**
+
+```bash
+export GOCACHEPROG="$(which gocacheprog)"
+go build ./...
+```
+
+Or via environment variables without a config file:
+
+```bash
+export GOCACHEPROG_TARGET="grpcs://remote.buildbuddy.io"
+export GOCACHEPROG_AUTH_HEADER="x-buildbuddy-api-key"
+export GOCACHEPROG_AUTH_TOKEN="<YOUR_API_KEY>"
+export GOCACHEPROG="$(which gocacheprog)"
+go build ./...
+```
+
+Build results and cache stats are visible in the [BuildBuddy UI](https://app.buildbuddy.io/invocation/).
 
 ## TLS
 

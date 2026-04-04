@@ -36,6 +36,7 @@ func TestLoadFromEnv(t *testing.T) {
 }
 
 func TestLoadMissingTarget(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // prevent real config file from supplying a target
 	t.Setenv("GOCACHEPROG_TARGET", "")
 	_, err := config.Load()
 	if err == nil {
@@ -221,6 +222,117 @@ func TestEnvOverridesTLSAndTimeouts(t *testing.T) {
 	}
 	if cfg.HealthAddr != ":8080" {
 		t.Errorf("HealthAddr = %q, want :8080", cfg.HealthAddr)
+	}
+}
+
+func TestLoadAuthHeaderEnvVars(t *testing.T) {
+	t.Setenv("GOCACHEPROG_TARGET", "localhost:9092")
+	t.Setenv("GOCACHEPROG_AUTH_HEADER", "x-buildbuddy-api-key")
+	t.Setenv("GOCACHEPROG_AUTH_TOKEN", "secret-token-abc")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthHeader != "x-buildbuddy-api-key" {
+		t.Errorf("AuthHeader = %q, want %q", cfg.AuthHeader, "x-buildbuddy-api-key")
+	}
+	if cfg.AuthToken != "secret-token-abc" {
+		t.Errorf("AuthToken = %q, want %q", cfg.AuthToken, "secret-token-abc")
+	}
+}
+
+func TestLoadTLSFlagEnvVar(t *testing.T) {
+	for _, val := range []string{"true", "1"} {
+		t.Run(val, func(t *testing.T) {
+			t.Setenv("GOCACHEPROG_TARGET", "localhost:9092")
+			t.Setenv("GOCACHEPROG_TLS", val)
+
+			cfg, err := config.Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !cfg.TLS {
+				t.Errorf("TLS = false, want true for GOCACHEPROG_TLS=%q", val)
+			}
+		})
+	}
+}
+
+func TestLoadTLSFlagDefaultFalse(t *testing.T) {
+	t.Setenv("GOCACHEPROG_TARGET", "localhost:9092")
+	// GOCACHEPROG_TLS not set
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TLS {
+		t.Error("TLS should default to false")
+	}
+}
+
+func TestAuthFromConfigFile(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".config", "gocacheprog")
+	os.MkdirAll(configDir, 0o700)
+
+	fileCfg := map[string]any{
+		"target":      "grpcs://remote.example.com",
+		"auth_header": "authorization",
+		"auth_token":  "Bearer mytoken",
+		"tls":         true,
+		"cache_dir":   t.TempDir(),
+	}
+	data, _ := json.Marshal(fileCfg)
+	os.WriteFile(filepath.Join(configDir, "config.json"), data, 0o600)
+
+	t.Setenv("HOME", home)
+	t.Setenv("GOCACHEPROG_TARGET", "grpcs://remote.example.com")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthHeader != "authorization" {
+		t.Errorf("AuthHeader = %q, want %q", cfg.AuthHeader, "authorization")
+	}
+	if cfg.AuthToken != "Bearer mytoken" {
+		t.Errorf("AuthToken = %q, want %q", cfg.AuthToken, "Bearer mytoken")
+	}
+	if !cfg.TLS {
+		t.Error("TLS = false, want true from config file")
+	}
+}
+
+func TestAuthEnvOverridesFile(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".config", "gocacheprog")
+	os.MkdirAll(configDir, 0o700)
+
+	fileCfg := map[string]any{
+		"target":      "localhost:9092",
+		"auth_header": "x-from-file",
+		"auth_token":  "token-from-file",
+		"cache_dir":   t.TempDir(),
+	}
+	data, _ := json.Marshal(fileCfg)
+	os.WriteFile(filepath.Join(configDir, "config.json"), data, 0o600)
+
+	t.Setenv("HOME", home)
+	t.Setenv("GOCACHEPROG_TARGET", "localhost:9092")
+	t.Setenv("GOCACHEPROG_AUTH_HEADER", "x-from-env")
+	t.Setenv("GOCACHEPROG_AUTH_TOKEN", "token-from-env")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthHeader != "x-from-env" {
+		t.Errorf("AuthHeader = %q, want %q", cfg.AuthHeader, "x-from-env")
+	}
+	if cfg.AuthToken != "token-from-env" {
+		t.Errorf("AuthToken = %q, want %q", cfg.AuthToken, "token-from-env")
 	}
 }
 

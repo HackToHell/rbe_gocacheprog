@@ -6,7 +6,9 @@ import (
 	"crypto/x509"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
+	"strings"
 	"time"
 
 	repb "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
@@ -16,10 +18,63 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
 const maxGRPCMessageSize = 64 * 1024 * 1024 // 64 MiB
+
+// ParseTarget accepts a target in any of these forms:
+//
+//	grpc://host[:port]   → insecure, default port 80
+//	grpcs://host[:port]  → TLS,      default port 443
+//	host:port            → no scheme; TLS determined by ClientConfig.TLS
+//
+// It returns the normalized "host:port" gRPC address and whether TLS should
+// be used. An error is returned for unrecognised schemes or missing hosts.
+func ParseTarget(raw string, fallbackTLS bool) (addr string, useTLS bool, err error) {
+	switch {
+	case strings.HasPrefix(raw, "grpcs://"):
+		host := strings.TrimPrefix(raw, "grpcs://")
+		if host == "" {
+			return "", false, fmt.Errorf("invalid target %q: empty host", raw)
+		}
+		addr, err = normalizeHostPort(host, "443")
+		return addr, true, err
+
+	case strings.HasPrefix(raw, "grpc://"):
+		host := strings.TrimPrefix(raw, "grpc://")
+		if host == "" {
+			return "", false, fmt.Errorf("invalid target %q: empty host", raw)
+		}
+		addr, err = normalizeHostPort(host, "80")
+		return addr, false, err
+
+	default:
+		if strings.Contains(raw, "://") {
+			scheme := raw[:strings.Index(raw, "://")]
+			return "", false, fmt.Errorf("unsupported scheme %q: use grpc:// or grpcs://", scheme)
+		}
+		addr, err = normalizeHostPort(raw, "443")
+		return addr, fallbackTLS, err
+	}
+}
+
+// normalizeHostPort ensures the address has a port, adding defaultPort if absent.
+func normalizeHostPort(hostport, defaultPort string) (string, error) {
+	if hostport == "" {
+		return "", fmt.Errorf("empty address")
+	}
+	// If it already has a port, validate and return as-is.
+	if _, _, err := net.SplitHostPort(hostport); err == nil {
+		return hostport, nil
+	}
+	// No port — check the raw value is a bare hostname/IP, then append default.
+	if strings.ContainsAny(hostport, "/?#") {
+		return "", fmt.Errorf("invalid host %q", hostport)
+	}
+	return net.JoinHostPort(hostport, defaultPort), nil
+}
 
 // ClientConfig holds REAPI client configuration.
 type ClientConfig struct {
@@ -30,7 +85,10 @@ type ClientConfig struct {
 	TLSCA          string
 	ConnectTimeout time.Duration
 	RequestTimeout time.Duration
-	MaxBatchSize   int64 // from capabilities, or default 4 MiB
+	MaxBatchSize   int64  // from capabilities, or default 4 MiB
+	TLS            bool   // enable TLS with system CAs (no client cert required)
+	AuthHeader     string // metadata key to send on every RPC, e.g. "authorization"
+	AuthToken      string // metadata value, e.g. "Bearer <token>"
 }
 
 // Client is the REAPI gRPC client.
@@ -48,6 +106,13 @@ type Client struct {
 
 // NewClient creates a new REAPI client, connects, and discovers capabilities.
 func NewClient(ctx context.Context, cfg ClientConfig) (*Client, error) {
+	addr, useTLS, err := ParseTarget(cfg.Target, cfg.TLS)
+	if err != nil {
+		return nil, fmt.Errorf("invalid target: %w", err)
+	}
+	cfg.Target = addr
+	cfg.TLS = useTLS
+
 	opts, err := dialOptions(cfg)
 	if err != nil {
 		return nil, err
@@ -270,7 +335,18 @@ func dialOptions(cfg ClientConfig) ([]grpc.DialOption, error) {
 		}),
 	}
 
-	if cfg.TLSCert == "" && cfg.TLSKey == "" && cfg.TLSCA == "" {
+	if cfg.AuthHeader != "" && cfg.AuthToken != "" {
+		md := metadata.Pairs(cfg.AuthHeader, cfg.AuthToken)
+		unary := func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, callOpts ...grpc.CallOption) error {
+			return invoker(metadata.NewOutgoingContext(ctx, md), method, req, reply, cc, callOpts...)
+		}
+		stream := func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, callOpts ...grpc.CallOption) (grpc.ClientStream, error) {
+			return streamer(metadata.NewOutgoingContext(ctx, md), desc, cc, method, callOpts...)
+		}
+		opts = append(opts, grpc.WithUnaryInterceptor(unary), grpc.WithStreamInterceptor(stream))
+	}
+
+	if cfg.TLSCert == "" && cfg.TLSKey == "" && cfg.TLSCA == "" && !cfg.TLS {
 		return append(opts, grpc.WithTransportCredentials(insecure.NewCredentials())), nil
 	}
 

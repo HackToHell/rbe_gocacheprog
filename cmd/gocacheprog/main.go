@@ -63,6 +63,9 @@ func run(ctx context.Context) error {
 		TLSCA:          cfg.TLSCA,
 		ConnectTimeout: cfg.ConnectTimeout.Duration,
 		RequestTimeout: cfg.RequestTimeout.Duration,
+		TLS:            cfg.TLS,
+		AuthHeader:     cfg.AuthHeader,
+		AuthToken:      cfg.AuthToken,
 	})
 	if err != nil {
 		slog.Warn("remote unavailable, starting in local-only mode", "error", err)

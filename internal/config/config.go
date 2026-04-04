@@ -58,6 +58,9 @@ type Config struct {
 	LogLevel          string   `json:"log_level"`
 	MaxArtifactSizeMB int64    `json:"max_artifact_size_mb"`
 	HealthAddr        string   `json:"health_addr"`
+	TLS               bool     `json:"tls"`          // enable TLS with system CAs (no client cert required)
+	AuthHeader        string   `json:"auth_header"`  // header name, e.g. "authorization"
+	AuthToken         string   `json:"auth_token"`   // header value, e.g. "Bearer <token>"
 }
 
 // Load returns configuration with precedence: env vars > config file > defaults.
@@ -156,6 +159,15 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("GOCACHEPROG_HEALTH_ADDR"); v != "" {
 		cfg.HealthAddr = v
+	}
+	if v := os.Getenv("GOCACHEPROG_TLS"); v == "true" || v == "1" {
+		cfg.TLS = true
+	}
+	if v := os.Getenv("GOCACHEPROG_AUTH_HEADER"); v != "" {
+		cfg.AuthHeader = v
+	}
+	if v := os.Getenv("GOCACHEPROG_AUTH_TOKEN"); v != "" {
+		cfg.AuthToken = v
 	}
 }
 
